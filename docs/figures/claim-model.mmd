@@ -1,0 +1,7 @@
+flowchart TB
+  I["init: claimed=false, accepted=0"] --> N["naive: readA / readB<br/>claimed=false"]
+  I --> S["safe: reserveA / reserveB<br/>claimed=true"]
+  N --> F["finishA / finishB: accepted + 1"]
+  S --> F
+  S --> R["other request: reject, accepted unchanged"]
+  F --> P["Check: accepted ≤ 1"]

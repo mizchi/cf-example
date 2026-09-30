@@ -1,0 +1,6 @@
+{
+  "source": ["models/durable-object.qnt", "models/lib/once.qnt"],
+  "labels": ["init:", "claimed=false", "accepted=0", "naive:", "readA", "readB", "safe:", "reserveA", "reserveB", "claimed=true", "finishA", "finishB:", "other", "request:", "reject,", "unchanged", "Check:"],
+  "forbidden": ["accepted ≤ 2"],
+  "edges": ["I->N", "I->S", "N->F", "S->F", "S->R", "F->P"]
+}

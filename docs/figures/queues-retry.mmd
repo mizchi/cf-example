@@ -1,0 +1,11 @@
+flowchart TB
+  I["send: one job ID"] --> D1["deliver: attempt 1"]
+  D1 --> E1["first effect: effectCount=1"]
+  E1 --> X["failAfterEffect: unacked"]
+  X --> D2["deliver: attempt 2"]
+  D2 --> E2["applyNaive: effectCount=2"]
+  E2 --> V["VIOLATION: effectCount ≤ 1 is false"]
+  D2 --> S["skipDuplicate: effectCount=1"]
+  S --> A["ack: message removed"]
+  classDef broken fill:#fce8e6,stroke:#b42318,color:#7a271a
+  class E2,V broken

@@ -1,0 +1,8 @@
+flowchart TB
+  S0["init<br/>claimed=false, accepted=0"] --> S1["readA<br/>A waits, claimed=false"]
+  S1 --> S2["readB<br/>B waits, claimed=false"]
+  S2 --> S3["finishA<br/>claimed=true, accepted=1"]
+  S3 --> S4["finishB<br/>claimed=true, accepted=2"]
+  S4 --> V["VIOLATION: accepted ≤ 1 is false"]
+  classDef broken fill:#fce8e6,stroke:#b42318,color:#7a271a
+  class S4,V broken

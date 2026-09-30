@@ -1,0 +1,6 @@
+{
+  "source": ["models/queues.qnt", "models/lib/queue-message.qnt", "models/lib/once.qnt", "TLC: stepNaive, atMostOneEffect counterexample"],
+  "labels": ["send:", "job ID", "deliver:", "attempt 1", "first effect:", "effectCount=1", "failAfterEffect:", "unacked", "attempt 2", "applyNaive:", "effectCount=2", "VIOLATION:", "skipDuplicate:", "ack:"],
+  "forbidden": ["effectCount=3"],
+  "edges": ["I->D1", "D1->E1", "E1->X", "X->D2", "D2->E2", "E2->V", "D2->S", "S->A"]
+}

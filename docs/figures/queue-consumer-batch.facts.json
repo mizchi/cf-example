@@ -1,0 +1,6 @@
+{
+  "source": ["models/queue-consumer.qnt", "models/lib/queue-message.qnt", "TLC: stepNaive, noAckBeforeEffect counterexample", "TLC: stepSafe, noCompletedBatch reachability witness"],
+  "labels": ["sendBatch:", "deliverBatch:", "processA:", "failB:", "handler", "implicit ackAll:", "ackA:", "retryFailedB:", "returnFirst", "deliverRetry:", "processB:", "ackB:", "returnRetry:"],
+  "forbidden": ["effectB=true before retry"],
+  "edges": ["S->D", "D->A", "A->F", "F->N", "N->V", "F->AA", "AA->RB", "RB->R1", "R1->D2", "D2->P2", "P2->AB", "AB->R2"]
+}

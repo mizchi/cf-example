@@ -1,0 +1,9 @@
+flowchart TB
+  I["init: accepted=false, status=new"] --> S["start: task running"]
+  S --> N["respondNaive: HTTP 202"]
+  N --> C["cancelOrReject: task failed"]
+  C --> V["VIOLATION: accepted work lost"]
+  S --> F["complete: status=done"]
+  F --> R["respondSafe: HTTP 200"]
+  classDef broken fill:#fce8e6,stroke:#b42318,color:#7a271a
+  class C,V broken

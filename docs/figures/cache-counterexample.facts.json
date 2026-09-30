@@ -1,0 +1,6 @@
+{
+  "source": ["models/sync.qnt", "TLC: stepNaive, monotonicClient counterexample"],
+  "labels": ["init:", "DO=0", "Cache=0", "UI=0", "startGet:", "version 0", "commitWrite:", "DO=1", "purge:", "Cache=-1", "GET=0", "acknowledgeWrite:", "maxSeen=1", "deliverGetNaive:", "VIOLATION:", "deliverGetSafe:"],
+  "forbidden": ["UI=2"],
+  "edges": ["I->G", "G->W", "W->P", "P->A", "A->N", "N->V", "A->S"]
+}

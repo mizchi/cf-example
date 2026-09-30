@@ -1,0 +1,37 @@
+{
+  "checks": [
+    {
+      "name": "all-models",
+      "cwd": "..",
+      "cmd": "node scripts/check-model.mjs",
+      "expect": [
+        "Workers Cache sync: naive counterexample found.",
+        "Workers Cache sync: repaired invariants hold.",
+        "Durable Object claim: naive counterexample found.",
+        "Durable Object claim: repaired invariants hold.",
+        "D1 replica read: naive counterexample found.",
+        "D1 replica read: repaired invariants hold.",
+        "R2 conditional put: naive counterexample found.",
+        "R2 conditional put: repaired invariants hold.",
+        "waitUntil background: naive counterexample found.",
+        "waitUntil background: repaired invariants hold.",
+        "waitUntil background: safe progress witness found.",
+        "Queues idempotency: naive counterexample found.",
+        "Queues idempotency: repaired invariants hold.",
+        "Queues idempotency: safe progress witness found.",
+        "Queues consumer batch: naive counterexample found.",
+        "Queues consumer batch: repaired invariants hold.",
+        "Queues consumer batch: safe progress witness found."
+      ]
+    },
+    {
+      "name": "claim-figures",
+      "cmd": "node ../scripts/check-claim-figures.mjs",
+      "expect": [
+        "naive: init → readA → readB → finishA → finishB; accepted=2",
+        "safe: init → reserveA → finishA → rejectB; accepted=1",
+        "claim diagrams: model trace and source mappings verified"
+      ]
+    }
+  ]
+}

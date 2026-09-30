@@ -1,0 +1,9 @@
+flowchart TB
+  A["A: POST"] --> W["Worker"]
+  B["B: POST"] --> W
+  W --> D["ClaimStore: same ID"]
+  D --> M{"mode"}
+  M --> N["naive: read, wait, put"]
+  M --> S["safe: reserve, wait"]
+  N --> R["claimed: true / false"]
+  S --> R

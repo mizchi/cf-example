@@ -8,3 +8,9 @@ dist/
 !.env.example
 *.log
 .DS_Store
+test-results/
+playwright-report/
+_apalache-out/
+.vlmkit/
+docs/figures/.figure-check/
+docs/.first-reader/

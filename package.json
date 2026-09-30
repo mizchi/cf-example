@@ -6,11 +6,19 @@
 		"dev": "cf dev",
 		"build": "cf build",
 		"deploy": "cf deploy",
-		"typecheck": "cf workers types && tsc"
+		"typecheck": "cf workers types && tsc",
+		"test:e2e": "playwright test"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "beta",
+		"@informalsystems/quint": "^0.33.0",
+		"@mizchi/vlmkit": "^0.22.0",
+		"@mizchi/vlmkit-anim": "^0.22.0",
+		"@playwright/test": "^1.63.0",
 		"cf": "^1.0.0-beta.5",
+		"marked": "^18.0.14",
+		"mermaid": "^12.0.0",
+		"playwright": "^1.63.0",
 		"typescript": "^7.0.2",
 		"vite": "^8.3.0"
 	}

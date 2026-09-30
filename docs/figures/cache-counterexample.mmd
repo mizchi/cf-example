@@ -1,0 +1,10 @@
+flowchart TB
+  I["init: DO=0, Cache=0, UI=0"] --> G["startGet: version 0 in flight"]
+  G --> W["commitWrite: DO=1"]
+  W --> P["purge: Cache=-1, GET=0"]
+  P --> A["acknowledgeWrite: UI=1, maxSeen=1"]
+  A --> N["deliverGetNaive: UI=0, maxSeen=1"]
+  N --> V["VIOLATION: UI != maxSeen"]
+  A --> S["deliverGetSafe: UI remains 1"]
+  classDef broken fill:#fce8e6,stroke:#b42318,color:#7a271a
+  class N,V broken

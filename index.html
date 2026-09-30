@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>cf + Vite</title>
+		<script type="module" src="/src/client.ts"></script>
+	</head>
+	<body>
+		<main>
+			<h1>cf + Vite</h1>
+			<p>The frontend and Worker API share this development server.</p>
+			<p>Worker response: <output id="message" role="status">Loading…</output></p>
+			<section aria-labelledby="document-heading">
+				<h2 id="document-heading">Shared document</h2>
+				<p>Value: <output data-testid="document-value"></output></p>
+				<p>Version: <output data-testid="document-version">—</output></p>
+				<p>Read: <output data-testid="document-get-status">Loading</output></p>
+				<form id="document-form">
+					<label for="document-input">Document value</label>
+					<input id="document-input" name="value" maxlength="1000" />
+					<button type="submit">Save</button>
+				</form>
+				<p id="document-feedback" aria-live="polite"></p>
+			</section>
+		</main>
+	</body>
+</html>

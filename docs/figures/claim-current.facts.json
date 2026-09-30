@@ -1,0 +1,6 @@
+{
+  "source": ["src/index.ts", "src/claim-store.ts", "cloudflare.config.ts"],
+  "labels": ["A: POST", "B: POST", "Worker", "ClaimStore:", "ID", "mode", "naive:", "safe:", "claimed:"],
+  "forbidden": ["D1", "R2"],
+  "edges": ["A->W", "B->W", "W->D", "D->M", "M->N", "M->S", "N->R", "S->R"]
+}

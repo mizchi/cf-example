@@ -1,0 +1,15 @@
+flowchart TB
+  S["sendBatch: A and B queued"] --> D["deliverBatch: queue handler"]
+  D --> A["processA: A effect done"]
+  A --> F["failB: B effect absent"]
+  F --> N["handler returns success"]
+  N --> V["implicit ackAll: B lost"]
+  F --> AA["ackA: A removed"]
+  AA --> RB["retryFailedB: B remains queued"]
+  RB --> R1["returnFirst"]
+  R1 --> D2["deliverRetry: B only"]
+  D2 --> P2["processB: B effect done"]
+  P2 --> AB["ackB: B removed"]
+  AB --> R2["returnRetry: both complete"]
+  classDef broken fill:#fce8e6,stroke:#b42318,color:#7a271a
+  class N,V broken

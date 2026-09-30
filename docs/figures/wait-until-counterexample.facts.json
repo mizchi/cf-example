@@ -1,0 +1,6 @@
+{
+  "source": ["models/wait-until.qnt", "TLC: stepNaive, noLostAccepted counterexample"],
+  "labels": ["init:", "accepted=false", "start:", "task running", "respondNaive:", "HTTP 202", "cancelOrReject:", "task failed", "VIOLATION:", "accepted work lost", "complete:", "status=done", "respondSafe:", "HTTP 200"],
+  "forbidden": ["status=4"],
+  "edges": ["I->S", "S->N", "N->C", "C->V", "S->F", "F->R"]
+}

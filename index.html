@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,6 +11,55 @@
 			<h1>cf + Vite</h1>
 			<p>The frontend and Worker API share this development server.</p>
 			<p>Worker response: <output id="message" role="status">Loading…</output></p>
+			<section id="pipeline" aria-labelledby="pipeline-heading">
+				<h2 id="pipeline-heading">文書イベントから検索と監査を作る</h2>
+				<p>保存 → 発行 → 検索・監査の順に進めます。検索と監査はそれぞれ独立した subscription を使います。</p>
+				<p><strong id="pipeline-mode">読み込み中</strong> · project: <span id="pipeline-project"></span></p>
+				<form id="pipeline-form">
+					<label for="pipeline-value">イベント用の文書内容</label>
+					<textarea id="pipeline-value" maxlength="1000" rows="3"></textarea>
+					<button type="submit">文書を保存</button>
+				</form>
+				<p>保存済み v<output id="pipeline-version">0</output> · 未発行 <output data-testid="pipeline-pending">0</output> 件</p>
+				<pre id="pipeline-source"></pre>
+				<div class="pipeline-actions">
+					<label for="pipeline-publish-fault">発行時の障害</label>
+					<select id="pipeline-publish-fault">
+						<option value="none">なし</option>
+						<option value="before-send">送信前に停止</option>
+						<option value="after-send">送信後の応答を失う</option>
+					</select>
+					<button id="pipeline-publish">イベントを発行</button>
+				</div>
+				<div class="pipeline-actions">
+					<label for="pipeline-consumer-fault">処理時の障害</label>
+					<select id="pipeline-consumer-fault">
+						<option value="none">なし</option>
+						<option value="after-first-effect">1 件反映して停止</option>
+						<option value="before-ack">全件反映して ack 前に停止</option>
+					</select>
+					<label><input type="checkbox" id="pipeline-reverse" />検索へ新しい版を先に渡す</label>
+				</div>
+				<p class="hint">障害を「なし」に戻して再実行すると回復します。同じイベントは二重に計上されません。</p>
+				<div class="projection-grid">
+					<div>
+						<h3>検索</h3>
+						<button id="pipeline-search-consume">検索を更新</button>
+						<label for="pipeline-query">検索語</label>
+						<input id="pipeline-query" type="search" />
+						<pre data-testid="pipeline-search"></pre>
+						<button id="pipeline-rebuild">検索を空にして再構築を準備</button>
+						<p class="hint">準備後に「検索を更新」で保持ログを再読込します。</p>
+					</div>
+					<div>
+						<h3>監査</h3>
+						<button id="pipeline-audit-consume">監査を更新</button>
+						<p>更新 <output data-testid="pipeline-audit-count">0</output> 件</p>
+						<pre id="pipeline-audit"></pre>
+					</div>
+				</div>
+				<p id="pipeline-feedback" aria-live="polite"></p>
+			</section>
 			<section aria-labelledby="document-heading">
 				<h2 id="document-heading">Shared document</h2>
 				<p>Value: <output data-testid="document-value"></output></p>

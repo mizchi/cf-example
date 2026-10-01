@@ -1,0 +1,7 @@
+%% 保持ログを入口にした縦方向。再構築の順序を上から下へ読む。
+flowchart TB
+  log["保持ログ<br/>E1 / E2"]
+  newSearch["新しい読者<br/>subscription<br/>earliest から読む"]
+  index["検索 v2 を再構築<br/>監査は 2 件のまま"]
+  log --> newSearch
+  newSearch --> index

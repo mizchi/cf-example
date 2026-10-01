@@ -1,0 +1,21 @@
+{
+  "format": "vlmkit-anim/scene@1",
+  "kind": "sequence",
+  "title": "同じログを、検索と監査がそれぞれ読む",
+  "stepMs": 1300,
+	"canvas": { "width": 720 },
+  "theme": { "fontSize": 22 },
+  "participants": [
+    { "id": "log", "label": "K2 ログ" },
+    { "id": "search", "label": "検索" },
+    { "id": "audit", "label": "監査" }
+  ],
+  "messages": [
+    { "note": "produce 後: ログに E1 / E2 がある", "at": "log" },
+    { "from": "log", "to": "search", "label": "E1・E2 を読む", "kind": "async", "caption": "検索用の subscription が二件を読み、検索データを更新する。矢印はデータの流れで、HTTP の開始方向は省略している。" },
+    { "from": "search", "to": "log", "label": "検索の batch ack", "kind": "async", "caption": "検索の cursor は 0 から 2 へ進む。ログは二件のまま、監査の cursor は 0 のまま。" },
+    { "note": "ログは E1 / E2 のまま", "at": "log" },
+    { "from": "log", "to": "audit", "label": "同じ E1・E2 を読む", "kind": "async", "caption": "監査用の別 subscription は、検索が ack 済みの同じ二件を読む。検索と監査へ一件ずつ分配するわけではない。" },
+    { "from": "audit", "to": "log", "label": "監査の batch ack", "kind": "async", "caption": "監査の cursor も 2 へ進む。両 subscription が処理しても保持ログには二件残る。" }
+  ]
+}

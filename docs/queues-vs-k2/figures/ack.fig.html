@@ -1,0 +1,49 @@
+<style>
+.ack-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 620px; margin: auto; font: 16px/1.65 system-ui, sans-serif; color: var(--fg, #1f2328); }
+.ack-card { border: 2px solid var(--muted, #57606a); border-radius: 10px; padding: 18px; }
+.ack-card h3 { margin: 0 0 12px; font-size: 23px; }
+.ack-card h4 { margin: 0 0 8px; font-size: 16px; }
+.ack-stage { padding: 12px; border: 1px solid var(--muted, #57606a); border-radius: 6px; }
+.ack-stage p { margin: 6px 0; }
+.ack-record { border: 2px solid var(--accent, #0550ae); padding: 6px 8px; border-radius: 4px; font-weight: 700; }
+.ack-empty { border: 2px dashed var(--muted, #57606a); padding: 6px 8px; border-radius: 4px; }
+.ack-arrow { text-align: center; font-weight: 700; margin: 12px 0; }
+.ack-arrow span { display: block; font-size: 24px; line-height: 1.2; }
+.ack-note { margin: 12px 0 0; font-weight: 700; }
+@media (max-width: 520px) { .ack-compare { grid-template-columns: 1fr; } }
+</style>
+<div class="ack-compare">
+  <div class="ack-card">
+    <h3>Queues</h3>
+    <div class="ack-stage">
+      <h4>ack 前</h4>
+      <p>未完了 1 件</p>
+      <div class="ack-record">仕事 M</div>
+    </div>
+    <div class="ack-arrow">処理成功 → ack<span aria-hidden="true">↓</span></div>
+    <div class="ack-stage">
+      <h4>ack 後</h4>
+      <p>未完了 0 件</p>
+      <div class="ack-empty">メッセージ M を削除</div>
+      <p>同じ Queue から再読込不可</p>
+    </div>
+    <p class="ack-note">消えるのはメッセージ。<br>処理結果の保存先は別。</p>
+  </div>
+  <div class="ack-card">
+    <h3>K2</h3>
+    <div class="ack-stage">
+      <h4>ack 前</h4>
+      <p>保持ログ 2 件</p>
+      <div class="ack-record">出来事 E1 / E2</div>
+      <p>検索 0 件完了 · 監査 0 件完了</p>
+    </div>
+    <div class="ack-arrow">検索が処理 → batch ack<span aria-hidden="true">↓</span></div>
+    <div class="ack-stage">
+      <h4>ack 後</h4>
+      <p>保持ログ 2 件</p>
+      <div class="ack-record">同じ E1 / E2 が残る</div>
+      <p>検索 2 件完了<br>監査 0 件完了</p>
+    </div>
+    <p class="ack-note">検索の進捗だけ確定。<br>ログは保持期限まで残る。</p>
+  </div>
+</div>

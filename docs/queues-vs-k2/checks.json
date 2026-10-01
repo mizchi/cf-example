@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "name": "semantics",
+      "cwd": "../..",
+      "cmd": "node docs/queues-vs-k2/examples/check-semantics.mjs",
+      "expect": [
+        "Queues: pending 1 -> 0; effectCount=1",
+        "K2: retained=2; search cursor=2; audit cursor=0",
+        "K2: both subscriptions acked; retained=2",
+        "figure facts: Quint ITF observations match"
+      ]
+    },
+    {
+      "name": "rebuild",
+      "cwd": "../..",
+      "cmd": "node docs/queues-vs-k2/examples/check-rebuild.mjs",
+      "expect": [
+        "Rebuild: search v2 -> empty -> v2; replayed=2",
+        "Rebuild: audit 2 -> 2 -> 2; subscription changed",
+        "figure facts: local HTTP rebuild observations match"
+      ]
+    }
+  ]
+}

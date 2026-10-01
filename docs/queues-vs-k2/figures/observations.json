@@ -1,0 +1,13 @@
+{
+  "queue": {
+    "beforePending": 1,
+    "afterPending": 0,
+    "effects": 1
+  },
+  "k2": {
+    "retained": 2,
+    "searchCursor": 2,
+    "auditCursor": 0,
+    "finalRetained": 2
+  }
+}

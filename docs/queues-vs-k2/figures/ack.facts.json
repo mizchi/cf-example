@@ -1,0 +1,23 @@
+{
+  "source": [
+    "models/queues.qnt",
+    "models/k2.qnt",
+    "Quint ITF / seed 7"
+  ],
+  "labels": [
+    "Queues",
+    "ack 前",
+    "未完了 1 件",
+    "ack 後",
+    "未完了 0 件",
+    "K2",
+    "保持ログ 2 件",
+    "検索 2 件完了",
+    "監査 0 件完了"
+  ],
+  "forbidden": [
+    "一度だけ配送",
+    "K2 の ack でログを削除",
+    "永遠に保持"
+  ]
+}

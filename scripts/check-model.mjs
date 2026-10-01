@@ -32,6 +32,30 @@ const models = [
 	{ name: "waitUntil background", file: "models/wait-until.qnt", main: "waitUntil", invariants: ["noLostAccepted"], sanityInvariant: "noCompletedAccepted", witness: ["start", "respondNaive", "cancelOrReject"] },
 	{ name: "Queues idempotency", file: "models/queues.qnt", main: "queues", invariants: ["atMostOneEffect", "queueWellFormed"], sanityInvariant: "noRetryHandled", witness: ["send", "deliver", "applyNaive", "failAfterEffect", "deliver", "applyNaive"] },
 	{ name: "Queues consumer batch", file: "models/queue-consumer.qnt", main: "queueConsumer", invariants: ["noAckBeforeEffect", "noLostB", "queueWellFormed"], sanityInvariant: "noCompletedBatch", witness: ["sendBatch", "deliverBatch", "processA", "failB", "catchAndReturnNaive"] },
+	{
+		name: "K2 batch consumer", file: "models/k2.qnt", main: "k2",
+		invariants: ["atMostOneEffect", "noAckBeforeEffects", "streamWellFormed", "subscriptionIsolation", "staleAckCannotAdvance", "recoveryKeepsBatch", "extensionKeepsLease"],
+		counterexamples: [{ step: "stepAckEarly", invariants: ["noAckBeforeEffects"], label: "early ack" }],
+		sanityChecks: [
+			{ invariant: "noReplayCompleted", label: "replay completion" },
+			{ invariant: "noFanoutCompleted", label: "independent subscriptions" },
+			{ invariant: "noStaleAckIgnored", label: "stale ack ignored" },
+			{ invariant: "noLeaseRecovery", label: "lease recovery" },
+			{ invariant: "noLeaseExtension", label: "lease extension" },
+		],
+	},
+	{
+		name: "Document event pipeline", file: "models/document-events.qnt", main: "documentEvents",
+		invariants: ["noLostSaved", "monotonicSearch", "atMostOneAudit", "readModelsNeverAhead", "auditConsistent"],
+		counterexamples: [
+			{ step: "stepStale", invariants: ["monotonicSearch"], label: "stale version" },
+			{ step: "stepDuplicate", invariants: ["atMostOneAudit"], label: "duplicate effect" },
+		],
+		sanityChecks: [
+			{ invariant: "noCaughtUp", label: "independent sinks caught up" },
+			{ invariant: "noRetriedPublicationCompletes", label: "publication retry completion" },
+		],
+	},
 ];
 
 const selected = process.argv.slice(2);
@@ -40,18 +64,21 @@ if (selected.some((name) => !models.some((model) => model.main === name))) {
 }
 
 for (const model of models.filter((model) => selected.length === 0 || selected.includes(model.main))) {
-	const broken = verify({ ...model, step: "stepNaive", invariants: model.invariants.slice(0, 1) });
-	if (broken.status !== 1 || !broken.output.includes("found a counterexample")) {
-		console.error(broken.output);
-		throw new Error(`${model.name}: expected a counterexample`);
-	}
-	if (model.witness) {
-		const actions = [...broken.output.matchAll(/^State \d+: <([A-Za-z]+) line/gm)].map((match) => match[1]);
-		if (actions.join() !== model.witness.join()) {
-			throw new Error(`${model.name}: unexpected TLC witness ${actions.join(" → ")}`);
+	const variants = [{ step: "stepNaive", invariants: model.invariants.slice(0, 1), witness: model.witness, label: "naive" }, ...(model.counterexamples ?? [])];
+	for (const variant of variants) {
+		const broken = verify({ ...model, ...variant });
+		if (broken.status !== 1 || !broken.output.includes("found a counterexample")) {
+			console.error(broken.output);
+			throw new Error(`${model.name}: expected a ${variant.label} counterexample`);
 		}
+		if (variant.witness) {
+			const actions = [...broken.output.matchAll(/^State \d+: <([A-Za-z]+) line/gm)].map((match) => match[1]);
+			if (actions.join() !== variant.witness.join()) {
+				throw new Error(`${model.name}: unexpected TLC witness ${actions.join(" → ")}`);
+			}
+		}
+		console.log(`${model.name}: ${variant.label} counterexample found.`);
 	}
-	console.log(`${model.name}: naive counterexample found.`);
 
 	const repaired = verify({ ...model, step: "stepSafe" });
 	if (repaired.status !== 0) {
@@ -60,12 +87,13 @@ for (const model of models.filter((model) => selected.length === 0 || selected.i
 	}
 	console.log(`${model.name}: repaired invariants hold.`);
 
-	if (model.sanityInvariant) {
-		const witness = verify({ ...model, step: "stepSafe", invariants: [model.sanityInvariant] });
+	const sanityChecks = [...(model.sanityInvariant ? [{ invariant: model.sanityInvariant, label: "safe progress" }] : []), ...(model.sanityChecks ?? [])];
+	for (const check of sanityChecks) {
+		const witness = verify({ ...model, step: "stepSafe", invariants: [check.invariant] });
 		if (witness.status !== 1 || !witness.output.includes("found a counterexample")) {
 			console.error(witness.output);
-			throw new Error(`${model.name}: safe progress witness was not reachable`);
+			throw new Error(`${model.name}: ${check.label} witness was not reachable`);
 		}
-		console.log(`${model.name}: safe progress witness found.`);
+		console.log(`${model.name}: ${check.label} witness found.`);
 	}
 }

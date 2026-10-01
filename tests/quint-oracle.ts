@@ -11,6 +11,27 @@ type ItfState = {
 	"mbt::actionTaken": string;
 };
 
+export function documentEventOracle(): { documentVersion: number; searchVersion: number; auditCount: number; actions: string[] } {
+	const directory = mkdtempSync(join(tmpdir(), "cf-document-events-"));
+	const output = join(directory, "events.itf.json");
+	try {
+		const result = spawnSync("pnpm", ["exec", "quint", "run", "models/document-events.qnt", "--main", "documentEvents",
+			"--step", "stepSafe", "--invariant", "noCaughtUp", "--max-steps", "30", "--max-samples", "100", "--seed", "7",
+			"--out-itf", output, "--mbt", "--backend", "typescript"], { encoding: "utf8" });
+		// noCaughtUp is a negated reachability property: a violation is the
+		// positive terminal witness used here, not a safety failure.
+		if (result.status !== 1 || !result.stdout.includes("[violation]")) throw new Error(`Quint failed: ${result.stdout}\n${result.stderr}`);
+		const trace = JSON.parse(readFileSync(output, "utf8")) as { states: {
+			documentVersion: { "#bigint": string }; searchVersion: { "#bigint": string }; auditCount: { "#bigint": string };
+			"mbt::actionTaken": string;
+		}[] };
+		const last = trace.states.at(-1);
+		if (!last) throw new Error("Quint returned an empty trace");
+		return { documentVersion: Number(last.documentVersion["#bigint"]), searchVersion: Number(last.searchVersion["#bigint"]),
+			auditCount: Number(last.auditCount["#bigint"]), actions: trace.states.slice(1).map(state => state["mbt::actionTaken"]) };
+	} finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
 export function claimOracle(mode: ClaimMode): { accepted: number; actions: string[] } {
 	const directory = mkdtempSync(join(tmpdir(), "cf-example-quint-"));
 	const output = join(directory, "claim.itf.json");

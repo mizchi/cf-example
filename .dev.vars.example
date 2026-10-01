@@ -1,0 +1,3 @@
+# Enable remote transport by setting K2_ENDPOINT when running just dev.
+# Copy this file to .dev.vars and supply an API token with K2 Produce/Consume.
+K2_API_TOKEN=replace-with-your-token

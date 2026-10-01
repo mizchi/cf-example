@@ -1,12 +1,17 @@
 import { env } from "cloudflare:workers";
 import type { HelloResponse } from "./contract";
+import { handlePipeline } from "./pipeline-api";
 import { isDocumentSnapshot, parseWriteBody, type WriteResult } from "./document-contract";
 export { DocumentStore } from "./document-store";
 export { ClaimStore } from "./claim-store";
+export { EventDocumentStore } from "./event-document-store";
+export { EventProjectionStore } from "./event-projection-store";
+export { LocalK2Stream } from "./local-k2-stream";
 
 export default {
 	async fetch(request, _env, ctx) {
 		const path = new URL(request.url).pathname;
+		if (path.startsWith("/api/pipeline/")) return handlePipeline(request);
 		if (path === "/api/hello") {
 			const data: HelloResponse = { message: `Hello ${env.WORLD}!` };
 			return Response.json(data);

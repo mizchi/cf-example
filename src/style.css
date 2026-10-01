@@ -12,10 +12,26 @@ body {
 }
 
 main {
-	max-width: 36rem;
+	width: min(64rem, calc(100% - 4rem));
 	padding: 2rem;
 }
 
 output {
 	font-weight: 700;
+}
+
+section { margin-block: 2rem; padding: 1.5rem; border: 1px solid #deded7; border-radius: .5rem; background: white; }
+label { display: block; margin-block: .6rem .3rem; }
+input, textarea, select, button { font: inherit; box-sizing: border-box; }
+textarea { width: 100%; }
+button { cursor: pointer; margin-block: .5rem; padding: .4rem .8rem; }
+button:disabled { cursor: wait; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: .8rem; background: #f3f3ee; min-height: 1.5rem; }
+.pipeline-actions { margin-block: 1rem; }
+.hint { font-size: .85rem; color: #555; }
+.projection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media (max-width: 640px) {
+	main { width: calc(100% - 2rem); padding: 1rem; }
+	section { padding: 1rem; }
+	.projection-grid { grid-template-columns: 1fr; }
 }

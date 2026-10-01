@@ -1,6 +1,7 @@
 import type { HelloResponse } from "./contract";
 import "./style.css";
 import { mountDocument } from "./document-client";
+import { mountPipeline } from "./pipeline-client";
 
 const output = document.querySelector<HTMLOutputElement>("#message");
 
@@ -40,3 +41,4 @@ loadGreeting().then(
 );
 
 mountDocument();
+mountPipeline();

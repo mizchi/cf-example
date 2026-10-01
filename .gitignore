@@ -14,3 +14,5 @@ _apalache-out/
 .vlmkit/
 docs/figures/.figure-check/
 docs/.first-reader/
+**/.first-reader/
+**/figures/.figure-check/

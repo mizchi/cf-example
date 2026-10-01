@@ -1,0 +1,25 @@
+{
+  "source": [
+    "src/pipeline-api.ts",
+    "src/event-projection-store.ts",
+    "src/local-k2-stream.ts",
+    "local HTTP API observations"
+  ],
+  "labels": [
+    "保持ログ",
+    "E1 / E2",
+    "新しい読者",
+    "subscription",
+    "earliest",
+    "検索 v2",
+    "監査は 2 件のまま"
+  ],
+  "edges": [
+    "log->newSearch",
+    "newSearch->index"
+  ],
+  "forbidden": [
+    "無期限",
+    "監査もリセット"
+  ]
+}

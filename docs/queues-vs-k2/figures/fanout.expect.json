@@ -1,0 +1,14 @@
+{
+  "format": "vlmkit-anim/expect@1",
+  "nodes": [
+    "log",
+    "search",
+    "audit"
+  ],
+  "messages": [
+    "log->search:E1・E2 を読む",
+    "search->log:検索の batch ack",
+    "log->audit:同じ E1・E2 を読む",
+    "audit->log:監査の batch ack"
+  ]
+}

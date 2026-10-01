@@ -2,7 +2,7 @@
 
 > 想定読者: TypeScript と HTTP は読めるが、Quint のモデル検査は初めての人。Worker の基本構文と HTTP の基礎は省く。
 
-このサンプルは、ブラウザーと Worker と Durable Object の間で起きる二つの競合を実装した。`waitUntil`・Queues・Queues Consumer・D1・R2 は小さな [Quint モデル](../models/)にした。各モデルで守りたい条件を一行で書き、修正前の反例を探し、修正後を再検査する。実装した部分は Playwright でも観測する。
+このサンプルは、ブラウザーと Worker と Durable Object の間で起きる二つの競合と、文書更新イベントから検索・監査を作る流れを実装した。`waitUntil`・Queues・Queues Consumer・D1・R2・K2 のプロトコルも小さな [Quint モデル](../models/)にした。各モデルで守りたい条件を一行で書き、修正前の反例を探し、修正後を再検査する。実装した部分は Playwright でも観測する。
 
 ## 一枚で見る現在地
 
@@ -15,14 +15,16 @@
 | Queues Consumer の batch | A/B の処理・ack・retry | 未処理の B を ack | A を `ack()`、B を `retry()` | モデル検査まで |
 | D1 の replica | primary・replica・bookmark・読取版 | `readVersion < bookmark` | bookmark 付き session | モデル検査まで |
 | R2 の上書き | ETag、A/B の観測値 | `staleAccepted` | ETag 条件付き PUT | モデル検査まで |
+| K2 の batch | 保持ログ、subscription ごとの lease・cursor、イベントごとの副作用 | 再配送で副作用が二重、未処理の record まで ack | イベント ID で原子的に冪等化し、全件処理後に batch ack | モデル検査まで |
+| 文書イベントの検索・監査 | 保存版、outbox、ログの複製、検索版、監査の処理済み ID | 発行前にイベントを失う、検索の巻き戻り、監査の重複 | 保存時 outbox、version 比較、宛先で原子的な冪等化 | モデル検査、HTTP 契約、ローカル代替との E2E |
 
-ローカルの `cf dev` は Vite の画面と Worker API を一つの URL で提供する。`cloudflare.config.ts` は二つの DO と Workers Cache を設定するが、この環境のローカル実行では Cache の HIT/MISS と purge 伝播は再現していない。Queues・D1・R2 の binding は作っていない。`waitUntil` のジョブ API も実装していない。この境界を越える主張は、以下ではモデルの検査結果として扱う。
+ローカルの `cf dev` は Vite の画面と Worker API を一つの URL で提供する。`cloudflare.config.ts` は五つの DO と Workers Cache を設定するが、この環境のローカル実行では Cache の HIT/MISS と purge 伝播は再現していない。文書イベントは既定でローカルの DO ログを使い、K2 HTTP へ切り替えるアダプターもある。実 K2、Queues・D1・R2 の binding、`waitUntil` のジョブ API は実行検証していない。
 
 ## 1. モデルの読み方
 
 Quint の `var` は状態、`action` は一回の状態変化、`x'` は変化**後**の値を表す。`stepNaive` は修正前の操作を、`stepSafe` は修正後の操作を選ぶ。モデル検査器は操作の順序を探索し、不変条件が初めて破れる状態列を返す。ここではその列を反例と呼ぶ。
 
-7 モデルはそれぞれ一つの対象と少数の参加者に絞っている。これは Cloudflare 全体の正しさを証明するモデルではない。具体的な観測値と対応づけられる状態だけを残し、順序が変わると壊れる最小の例を探す。
+9 モデルはそれぞれ一つの対象と少数の参加者に絞っている。これは Cloudflare 全体の正しさを証明するモデルではない。具体的な観測値と対応づけられる状態だけを残し、順序が変わると壊れる最小の例を探す。
 
 ### 共通操作とアプリ固有の契約
 
@@ -235,9 +237,72 @@ Cloudflare Queues では[メッセージごとの `ack()` は後続の batch 失
 
 修正版は観測した ETag と現在の ETag が一致する場合だけ PUT する。[R2 Workers API の `onlyIf.etagMatches`](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/#conditional-operations) に対応する。R2 binding とバケットは作っていないため、実 R2 の E2E や条件失敗後の再試行・マージは検証していない。
 
-## 9. 反例から実装テストへ
+## 9. K2: lease が切れても副作用は止まらない（モデルのみ）
 
-モデル検査は、それぞれの小さな状態空間で不変条件を調べる。E2E が実装と照合するのは二つの観測値だけだ。DO では**成功応答数**、Cache では**遅れて届いた GET の後の画面の版**を使う。`waitUntil`・Queues・Queues Consumer・D1・R2 は現状モデル検査までなので、表の「修正」は実 API の実装結果ではない。
+[K2 は保持期間内のイベントログを subscription ごとに読む](https://developers.cloudflare.com/k2/concepts/)。ack はその subscription の進捗を確定し、ログ自体を削除しない。[lease の期限切れや nack の後は batch が再配送され、新しい `batch_id` が付く](https://developers.cloudflare.com/k2/features/consume/)。Queues のような record 単位の ack はなく、処理の一部が失敗すれば batch 全体を再処理する。
+
+[`models/lib/k2-subscription.qnt`](../models/lib/k2-subscription.qnt) に K2 の lease・ack・nack・再取得・延長を置き、[`models/k2.qnt`](../models/k2.qnt) に保持ログとアプリの副作用を置いた。Analytics と Audit の二つの subscription、Analytics を共有する二つの worker、イベント ID 1/2 の二件だけを扱う。
+
+| 状態 | 意味 |
+| --- | --- |
+| `log` | produce 成功で原子的に追加した二件。ack 後も保持される |
+| `Analytics::batchId`, `Audit::batchId` | 各 subscription の配送世代。再配送で変わる |
+| `holder`, `remaining`, `cursor` | subscription ごとの lease 所有者、残り時間、batch の確定位置 |
+| `localBatch`, `handled` | worker が持つ batch ID と、今回処理したイベント |
+| `processed`, `effects` | Analytics の宛先が記録したイベント ID と、各イベントの副作用回数 |
+
+`stepNaive` では、worker が一件を処理した後に lease が切れ、新しい worker に同じ二件が届く。古い worker のアプリ処理も続行できる。K2 が有効な lease を一つに制限しても、宛先への副作用まで止めるわけではない。どちらも同じイベントを適用すると `atMostOneEffect` が破れる。
+
+もう一つの `stepAckEarly` は、一件だけ処理して batch 全体を ack する。未処理のもう一件も subscription の処理済み範囲に入り、`noAckBeforeEffects` が破れる。
+
+<!-- source: ../models/k2.qnt -->
+```quint
+  val atMostOneEffect = Records.forall(event => effects.get(event) <= 1)
+  val noAckBeforeEffects = Analytics::cursor == 0 or processed == Records
+```
+
+修正版は、**producer が payload に付けた安定したイベント ID**の記録と副作用を、宛先で一つの原子的な操作にする。`batch_id` は再配送で変わるので、冪等化のキーには使えない。再配送時は処理済みイベントを飛ばし、二件とも処理済みになってから batch を ack する。Analytics と Audit は異なる宛先を持つ前提で、Audit は独立に二件を処理する。
+
+同じ worker が lease 中に再取得すると、同じ batch が返り lease が更新される。`extend` は現在の batch と所有者が一致する時だけ可能とした。古い batch の ack は、新しい配送の cursor を進めない。これらの不変条件に加え、再配送後の完了、両 subscription の完了、古い ack の無効化、再取得、延長が**実際に到達可能**なことも TLC で確かめる。正常系を動かなくしただけの修正は、この到達性検査に失敗する。
+
+検査の境界は一つの produce 成功、二件、最大二世代の配送、保持期間内だ。二つの tick は五分の lease を抽象化する値であり、実時間ではない。期限後かつ再配送前の ack は仕様が明示する無効化の条件に入らないため、成功を許す保守的なモデルにした。Audit は一回で処理を完了する。保持期限による削除、複数 partition の順序、producer の結果不明・再送、外部 API と記録の非原子的な更新は含めない。[produce 結果が不明な失敗では、再送がログ内の重複を作ることもある](https://developers.cloudflare.com/k2/features/produce/#handle-errors)。
+
+実サービスとの照合は未実施だ。`cf` beta.10 は K2 管理コマンドに対応するが、現在の認証ではストリーム一覧取得が 403 だった。実ストリーム・consumer・binding は作成していない。モデルの検査は `just model-check k2`、既存の七つを含めた検査は `just model-check` で固定する。
+
+## 10. 文書イベント: 保存から検索・監査へ
+
+文書の更新をイベントとして残せば、同じログを検索と監査で別々に処理できる。検索が停止しても監査を進められ、検索の作り方を変えた時には保持ログを再読込できる。このサンプルは [`src/event-document-store.ts`](../src/event-document-store.ts) で文書と outbox を保存し、[`src/pipeline-api.ts`](../src/pipeline-api.ts) で検索・監査の consumer を実行する。起動と操作は [リポジトリの README](../README.md) を参照。
+
+```text
+文書と outbox を同時保存 → 発行 → 保持ログ
+                                  ├ search subscription → 最新版の検索
+                                  └ audit subscription  → 更新の監査
+```
+
+保存後の発行前に停止すると、メモリーだけに持つイベントは消える。文書と outbox の原子的な保存なら、発行を再実行できる。発行後の応答を失った場合はログに二つの複製ができ得るので、宛先側でも冪等化する。イベント ID は `project:document:version` とし、発行の再試行では同じ ID を使う。保存 API 自体をもう一度呼ぶと新しい version になる。
+
+[`models/document-events.qnt`](../models/document-events.qnt) は一文書、二つの version、各イベントの最大二回の発行と consumer 処理を扱う。K2 の lease/ack の状態は前章のモデルで検査し、このモデルは保存・発行・宛先の契約に絞る。
+
+| 検査 | 修正前の違反 | 修正版 |
+| --- | --- | --- |
+| `noLostSaved` | 保存 → 発行前の crash でイベントを失う | 文書と outbox を同時保存 |
+| `monotonicSearch` | v2 を反映した後に v1 を上書き | 文書ごとに最大 version を保持 |
+| `atMostOneAudit` | 同じイベントの再処理で更新数が増える | イベント ID の記録と計上を同時確定 |
+| `readModelsNeverAhead`, `auditConsistent` | 保存前の版の反映や計上との不整合 | 公開済みイベントだけを反映し、計上も同じ transaction |
+
+TLC は三つの修正前の反例を検出し、修正版の五つの不変条件を確認する。両 consumer が v2・監査 2 件まで追いつく経路、応答喪失後の再送が完了する経路も到達性として検査する。永続化と外部送信の間は別操作にしているので、途中で停止する順序も探索する。
+
+実装では [`src/event-projection-store.ts`](../src/event-projection-store.ts) の transaction が [`applyDocumentEvent`](../src/event-projection.ts) の計上と ID 記録をまとめて保存する。検索のリセットは新しい subscription 名を保存し、旧世代の consumer からの更新を拒否する。新しい subscription は earliest で始めるため、ack 済みの保持ログを再読込できる。監査は別の DO と subscription なのでリセットされない。
+
+[`tests/pipeline.spec.ts`](../tests/pipeline.spec.ts) は保存後の発行失敗、発行後の応答喪失、batch 処理途中の停止、古い版の到着、検索の再構築、同時保存と再取得、画面操作を観測する。途中停止からの回復テストは [`tests/quint-oracle.ts`](../tests/quint-oracle.ts) で得た ITF の `documentVersion`・`searchVersion`・`auditCount` と API の最終状態を照合する。操作列そのものを再生するテストではない。
+
+[`tests/k2-contract.spec.ts`](../tests/k2-contract.spec.ts) は公式 HTTP の JSON 形、UTF-8/base64、produce の失敗と結果不明、空 batch、不正なイベントの拒否を確認する。既定のログは [`LocalK2Stream`](../src/local-k2-stream.ts) という DO のローカル代替で、一 subscription 一 lease に絞った実装だ。実 K2 の遅延、保持期限、128 並列 lease、実ネットワークでの障害は検証していない。
+
+このデモの発行と consumer はボタン/API で手動実行する。一回につき最大 100 件で、未処理分があれば繰り返す。自動再試行、認証、ログや処理済み ID の掃除、保持期間を超えた検索の再構築は扱わない。監査はログが保持される間の再処理に耐えるが、本番用の不変な監査保管庫を実装したものではない。
+
+## 11. 反例から実装テストへ
+
+モデル検査は、それぞれの小さな状態空間で不変条件を調べる。E2E は DO の**成功応答数**、Cache の**遅れて届いた GET の後の画面の版**、文書イベントの**保存版・検索版・監査件数**などを観測する。K2 の実サービスを含め、`waitUntil`・Queues・Queues Consumer・D1・R2 の表の「修正」は実 API の実行結果ではない。
 
 <!-- output: all-models -->
 ```text
@@ -258,17 +323,33 @@ Queues idempotency: safe progress witness found.
 Queues consumer batch: naive counterexample found.
 Queues consumer batch: repaired invariants hold.
 Queues consumer batch: safe progress witness found.
+K2 batch consumer: naive counterexample found.
+K2 batch consumer: early ack counterexample found.
+K2 batch consumer: repaired invariants hold.
+K2 batch consumer: replay completion witness found.
+K2 batch consumer: independent subscriptions witness found.
+K2 batch consumer: stale ack ignored witness found.
+K2 batch consumer: lease recovery witness found.
+K2 batch consumer: lease extension witness found.
+Document event pipeline: naive counterexample found.
+Document event pipeline: stale version counterexample found.
+Document event pipeline: duplicate effect counterexample found.
+Document event pipeline: repaired invariants hold.
+Document event pipeline: independent sinks caught up witness found.
+Document event pipeline: publication retry completion witness found.
 ```
 
 ```sh
 just install
 pnpm exec playwright install chromium
-just model-check # Java が必要。七つの反例と修正版を TLC で確認
-just test        # DO と画面の E2E
+just model-check # Java が必要。九つのモデルの反例と修正版を TLC で確認
+just model-check k2 # K2 のみ検査
+just model-check documentEvents # 文書イベントの契約
+just test        # DO・画面・イベント処理の E2E と HTTP 契約
 just check       # 型検査、ビルド、dry run、E2E、モデル検査
 ```
 
-## 10. 何を保証できるか
+## 12. 何を保証できるか
 
 ここで「モデル内で保証」と言うときは、**定義した初期状態から `stepSafe` で到達できる状態では、指定した不変条件が破れない**という意味に限る。TLC が調べるのは Quint に書いた状態と操作だ。Cloudflare の実装や、このリポジトリの TypeScript がすべて同じ操作だけを行うことまで証明したわけではない。修正前の反例は「この順序なら違反する」の証拠であり、実環境で常に違反するという主張でもない。
 
@@ -281,15 +362,18 @@ just check       # 型検査、ビルド、dry run、E2E、モデル検査
 | Queues Consumer | 効果がないメッセージを ack せず、未処理の B をキューから失わない（`noAckBeforeEffect`, `noLostB`） | A/B の二件、B は一度失敗。A の `ack()` と B の `retry()` を明示する |
 | D1 | 読み取った版が bookmark より古くない（`readMyWrites`） | 一つの primary、replica、session。bookmark を付けて読める時だけ読む |
 | R2 | 古い ETag を前提とする上書きを受理しない（`noStaleOverwrite`） | 一オブジェクト、二つの書き手。条件付き PUT が原子的 |
+| K2 | イベントごとの副作用は高々一回、全件処理前に batch を確定しない。古い ack は新しい配送を確定しない | 二件、二 subscription、二 worker、最大二配送。宛先でイベント ID と副作用を原子的に確定。保持期間内 |
+| 文書イベント | 保存イベントを失わず、検索が巻き戻らず、監査を二重計上しない | 一文書、二つの版、最大二回の発行・処理。outbox と各宛先で原子的に保存。保持期間内 |
 
-モデルの外で確かめたのは二点だけだ。Playwright は、**DO の同時要求で返る成功件数**と、**古い GET を遅れて届けた後の画面の版**をローカル実装で照合した。前者はモデルの ITF トレースから得た成功件数を期待値に使う。ただし操作列そのものは再生していない。どちらもテストした入力と実行環境での観測であり、すべての要求順序や障害での正しさを保証しない。残りの五つは実 API と照合していない。
+Playwright はローカル実装で、DO の同時要求の成功件数、遅れた GET 後の画面の版、文書イベントの障害回復と再構築を照合した。DO の成功件数と文書イベントの最終状態には ITF の期待値を使うが、操作列そのものは再生していない。これらはテストした入力と実行環境での観測であり、すべての要求順序や障害での正しさを保証しない。K2 の実サービスなどは未照合だ。
 
-## 11. 何を保証できないか
+## 13. 何を保証できないか
 
 - **最終的な完了**: 不変条件は「悪い状態が現れない」という安全性だ。仕事が必ず処理される、replica が必ず追いつく、R2 の競合した書き込みがいつか成功する、といった進行は示さない。`safe progress witness found` も成功する**一つの経路が存在する**ことの確認であり、すべての経路の完了保証ではない。
 - **Queue の exactly once**: `atMostOneEffect` は副作用ゼロ回でも成立する。Consumer の再試行上限、保持期限、DLQ、並列配送、繰り返す失敗はモデルにない。[再試行上限後は DLQ がなければ削除される](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)ため、Queues だけで「必ず一回実行」を主張できない。外部 API 呼び出しと処理済み記録を別々に行う実装にも、原子的な `applySafe` の結果は当てはまらない。
+- **K2 の exactly once と無期限の保持**: lease は宛先の副作用を排他制御しない。原子的なイベント ID の記録を前提とした安全性であり、すべてのイベントが必ず完了する保証ではない。文書イベントモデルは二回までの producer 再送を扱うが、保持期限切れ・多数の並列 batch はモデル外だ。
 - **`waitUntil` での受理後完了**: 修正版は効果の完了を待ってから応答する。応答後に走る仕事を 202 で受理し、その完了を保証したことにはならない。[`waitUntil` の応答後の実行には期限がある](https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil)。応答送信の失敗、再送、部分的に成功した外部副作用もこのモデルにない。
-- **Cloudflare 上での一貫性**: Cache の HIT/MISS・purge 伝播、複数地域、実 D1 replica、実 R2、Queues binding と Consumer はこのリポジトリで検証していない。モデルの前提が実際の境界とずれていれば、モデル内の保証は実装へ移せない。
+- **Cloudflare 上での一貫性**: Cache の HIT/MISS・purge 伝播、複数地域、実 D1 replica、実 R2、Queues と K2 の binding・consumer はこのリポジトリで検証していない。モデルの前提が実際の境界とずれていれば、モデル内の保証は実装へ移せない。
 
 したがって、このサンプルが示すのは「契約を明記し、反例を見つけ、修正版の小さなモデルを検査し、一部を実装テストに接続する」までだ。実サービスの保証を増やすには、同じ契約を満たす Consumer と binding を実装し、失敗注入を含む実行テストでモデルとの対応を確かめる必要がある。
 
@@ -301,6 +385,7 @@ just check       # 型検査、ビルド、dry run、E2E、モデル検査
 4. Queue が再配信した時、処理済み ID の記録と副作用をなぜ一体にするか。
 5. Consumer が B の処理失敗を握りつぶして正常終了すると、B はどうなるか。
 6. D1 と R2 の修正案は、このリポジトリで実 API まで検証したか。
+7. K2 の lease が切れた後、古い worker の副作用と古い batch の ack はそれぞれどうなるか。
 
 <details>
 <summary>答えを見る</summary>
@@ -311,5 +396,6 @@ just check       # 型検査、ビルド、dry run、E2E、モデル検査
 4. 別々だと、どちらか一方の後で失敗した時に仕事の喪失または二重実行が残るから。
 5. B も ack され、処理されないまま失われる。B を `retry()` に指定する。
 6. いいえ。両者はモデル検査までで、binding と実リソースはまだない。
+7. 古い worker の副作用は続行できるので、宛先の冪等化が必要。再配送後の古い ack は、新しい batch の進捗を確定しない。
 
 </details>

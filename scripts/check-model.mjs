@@ -25,6 +25,12 @@ function verify({ file, main, step, invariants }) {
 }
 
 const models = [
+	{ name: "Retention recovery", file: "models/retention-recovery.qnt", main: "retentionRecovery",
+		invariants: ["noFalseCaughtUp", "noSilentAuditSkip", "projectionsNeverAhead"],
+		counterexamples: [{ step: "stepAuditNaive", invariants: ["noSilentAuditSkip"], label: "silent audit gap" }],
+		sanityInvariant: "noRecoveredWithConcurrentWrite" },
+	{ name: "Save request idempotency", file: "models/save-request.qnt", main: "saveRequest", invariants: ["oneOperationOneUpdate", "receiptMatchesCommit", "stableResponse"], sanityInvariant: "noRetriedResponse" },
+	{ name: "Poison event quarantine", file: "models/poison-events.qnt", main: "poisonEvents", invariants: ["noAckBeforeDisposition", "atMostOneDisposition", "badRecordNeverApplied"], sanityInvariant: "noRecoveredBatch" },
 	{ name: "Workers Cache sync", file: "models/sync.qnt", main: "sync", invariants: ["monotonicClient", "cacheNeverAhead"] },
 	{ name: "Durable Object claim", file: "models/durable-object.qnt", main: "durableObject", invariants: ["atMostOneClaim"] },
 	{ name: "D1 replica read", file: "models/d1.qnt", main: "d1", invariants: ["readMyWrites"] },

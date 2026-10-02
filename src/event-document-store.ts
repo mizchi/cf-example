@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import { parseWriteBody, type DocumentSnapshot } from "./document-contract";
-import { eventId, isObject, isPublishFault, type DocumentUpdatedEvent, type EventDocumentView, type PublishFault } from "./event-contract";
+import type { DocumentSnapshot } from "./document-contract";
+import { eventId, isIdentifier, isObject, isPublishFault, parseEventWrite, type DocumentUpdatedEvent, type EventDocumentView, type PublishFault } from "./event-contract";
 import { createEventStream, transportMode } from "./event-transport";
+import { registerSourceDocument } from "./event-source";
 
 const initial: DocumentSnapshot = { value: "", version: 0 };
 
@@ -14,6 +15,17 @@ export class EventDocumentStore extends DurableObject {
 	}
 
 	async fetch(request: Request): Promise<Response> {
+		if (/^\/api\/pipeline\/[a-zA-Z0-9-]{1,64}\/catalog$/.test(new URL(request.url).pathname)) {
+			if (request.method === "GET") {
+				const entries = await this.ctx.storage.list({ prefix: "catalog:", limit: 101 });
+				if (entries.size > 100) return Response.json({ error: "This demo supports snapshots of at most 100 documents" }, { status: 409 });
+				return Response.json({ documentIds: [...entries.keys()].map(key => key.slice("catalog:".length)) });
+			}
+			const body: unknown = await request.json().catch(() => null);
+			if (request.method !== "POST" || !isObject(body) || !isIdentifier(body.documentId)) return new Response("Invalid catalog request", { status: 400 });
+			await this.ctx.storage.put(`catalog:${body.documentId}`, true);
+			return Response.json({ registered: true });
+		}
 		const match = /^\/api\/pipeline\/([a-zA-Z0-9-]{1,64})\/documents\/([a-zA-Z0-9-]{1,64})(\/publish)?$/.exec(new URL(request.url).pathname);
 		if (!match) return new Response("Not found", { status: 404 });
 		const [, projectId, documentId, publishing] = match;
@@ -27,11 +39,18 @@ export class EventDocumentStore extends DurableObject {
 			const fault: unknown = body.fault ?? "none";
 			if (!isPublishFault(fault)) return new Response("Invalid publish fault", { status: 400 });
 			if (fault !== "none" && transportMode() !== "local") return new Response("Fault injection requires local transport", { status: 400 });
+			await registerSourceDocument(projectId, documentId);
 			return this.publish(projectId, fault);
 		}
-		const value = parseWriteBody(body);
-		if (value === null) return new Response("Invalid value", { status: 400 });
+		const write = parseEventWrite(body);
+		if (!write || (write.fault !== "none" && (transportMode() !== "local" || !write.requestId))) return new Response("Invalid write options", { status: 400 });
+		const { value, requestId } = write;
+		// Register only validated writes, before changing the source document.
+		await registerSourceDocument(projectId, documentId);
 		const result = await this.ctx.storage.transaction(async transaction => {
+			const key = requestId === undefined ? null : `request:${requestId}`;
+			const receipt = key ? await transaction.get<{ value: string; result: EventDocumentView }>(key) : undefined;
+			if (receipt) return receipt.value === value ? receipt.result : null;
 			const current = await transaction.get<DocumentSnapshot>("document") ?? initial;
 			const next: DocumentSnapshot = { value, version: current.version + 1 };
 			const event: DocumentUpdatedEvent = { ...next, type: "document.updated", schemaVersion: 1,
@@ -39,8 +58,12 @@ export class EventDocumentStore extends DurableObject {
 			// Saving a document always leaves a durable event to publish.
 			await transaction.put("document", next);
 			await transaction.put(`outbox:${String(next.version).padStart(16, "0")}`, event);
-			return { document: next, pending: [...(await transaction.list<DocumentUpdatedEvent>({ prefix: "outbox:" })).values()] };
+			const result = { document: next, pending: [...(await transaction.list<DocumentUpdatedEvent>({ prefix: "outbox:" })).values()] };
+			if (key) await transaction.put(key, { value, result });
+			return result;
 		});
+		if (!result) return Response.json({ error: "requestId was already used with different content" }, { status: 409 });
+		if (write.fault === "after-save") return Response.json({ error: "Save response lost after commit" }, { status: 503 });
 		return Response.json(result);
 	}
 

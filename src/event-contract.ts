@@ -2,7 +2,9 @@ import { isDocumentSnapshot, type DocumentSnapshot } from "./document-contract";
 
 export type ProjectionName = "search" | "audit";
 export type PublishFault = "none" | "before-send" | "after-send";
-export type ConsumerFault = "none" | "after-first-effect" | "before-ack";
+export type ConsumerFault = "none" | "after-first-effect" | "before-ack" | "before-quarantine";
+export interface EventWriteRequest { value: string; requestId?: string; fault: "none" | "after-save" }
+export interface QuarantinedRecord { id: string; content: string; timestamp_ms: number; reason: string }
 
 export interface DocumentUpdatedEvent extends DocumentSnapshot {
 	type: "document.updated";
@@ -21,10 +23,18 @@ export interface EventDocumentView {
 interface ProjectionBase {
 	subscription: string;
 	processedEventIds: string[];
+	quarantined: QuarantinedRecord[];
+	historyComplete: boolean;
+	recoveryRequired: boolean;
 }
 export interface SearchProjection extends ProjectionBase {
 	name: "search";
 	documents: (DocumentSnapshot & { documentId: string })[];
+}
+export interface SearchRecoveryRequest {
+	subscription: string;
+	previousSubscription: string;
+	documents: SearchProjection["documents"];
 }
 export interface AuditProjection extends ProjectionBase {
 	name: "audit";
@@ -45,6 +55,27 @@ export function isObject(value: unknown): value is Record<string, unknown> {
 export function isIdentifier(value: unknown): value is string {
 	return typeof value === "string" && /^[a-zA-Z0-9-]{1,64}$/.test(value);
 }
+export function parseEventWrite(value: unknown): EventWriteRequest | null {
+	if (!isObject(value) || typeof value.value !== "string" || value.value.length > 1000 ||
+		(value.requestId !== undefined && !isIdentifier(value.requestId)) ||
+		(value.fault !== undefined && value.fault !== "none" && value.fault !== "after-save")) return null;
+	return { value: value.value, ...(value.requestId === undefined ? {} : { requestId: value.requestId as string }),
+		fault: value.fault === "after-save" ? "after-save" : "none" };
+}
+export function isQuarantinedRecord(value: unknown): value is QuarantinedRecord {
+	return isObject(value) && typeof value.id === "string" && /^[a-f0-9]{64}$/.test(value.id) &&
+		typeof value.content === "string" && typeof value.timestamp_ms === "number" &&
+		Number.isSafeInteger(value.timestamp_ms) && value.timestamp_ms >= 0 && typeof value.reason === "string" && value.reason.length > 0;
+}
+export function isSearchDocuments(value: unknown): value is SearchProjection["documents"] {
+	return Array.isArray(value) && value.length <= 100 && value.every(document =>
+		isObject(document) && isDocumentSnapshot(document) && document.version > 0 && isIdentifier(document.documentId)) &&
+		new Set(value.map(document => document.documentId)).size === value.length;
+}
+export function isSearchRecoveryRequest(value: unknown): value is SearchRecoveryRequest {
+	return isObject(value) && typeof value.subscription === "string" && typeof value.previousSubscription === "string" &&
+		isSearchDocuments(value.documents);
+}
 export function eventId(projectId: string, documentId: string, version: number): string {
 	return `${projectId}:${documentId}:${version}`;
 }
@@ -60,7 +91,9 @@ export function isEventDocumentView(value: unknown): value is EventDocumentView 
 }
 export function isProjectionState(value: unknown): value is ProjectionState {
 	if (!isObject(value) || typeof value.subscription !== "string" || !Array.isArray(value.processedEventIds) ||
-		!value.processedEventIds.every(id => typeof id === "string")) return false;
+		!value.processedEventIds.every(id => typeof id === "string") || !Array.isArray(value.quarantined) ||
+		!value.quarantined.every(isQuarantinedRecord) || typeof value.historyComplete !== "boolean" ||
+		typeof value.recoveryRequired !== "boolean") return false;
 	if (value.name === "search") return Array.isArray(value.documents) && value.documents.every(document =>
 		isObject(document) && isDocumentSnapshot(document) && isIdentifier(document.documentId));
 	return value.name === "audit" && typeof value.totalUpdates === "number" && Number.isSafeInteger(value.totalUpdates) && value.totalUpdates >= 0 &&
@@ -76,5 +109,5 @@ export function isPublishFault(value: unknown): value is PublishFault {
 	return value === "none" || value === "before-send" || value === "after-send";
 }
 export function isConsumerFault(value: unknown): value is ConsumerFault {
-	return value === "none" || value === "after-first-effect" || value === "before-ack";
+	return value === "none" || value === "after-first-effect" || value === "before-ack" || value === "before-quarantine";
 }

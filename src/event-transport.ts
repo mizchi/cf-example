@@ -1,5 +1,17 @@
 import { env } from "cloudflare:workers";
 import { K2Client } from "./k2-client";
+import { isObject } from "./event-contract";
+
+// Application-owned simulator controls. These are NOT K2 HTTP API routes.
+export async function localHistoryGap(project: string, subscription: string, resume = false): Promise<boolean | null> {
+	if (transportMode() !== "local") return null;
+	const response = await env.EVENT_STREAM.get(env.EVENT_STREAM.idFromName(project)).fetch("https://local-k2/history", {
+		method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: subscription, resume }),
+	});
+	const body: unknown = await response.json();
+	if (!response.ok || !isObject(body) || !isObject(body.result) || typeof body.result.gap !== "boolean") throw new Error("Invalid local history response");
+	return body.result.gap;
+}
 
 export function transportMode(): "local" | "remote" {
 	return env.K2_ENDPOINT ? "remote" : "local";

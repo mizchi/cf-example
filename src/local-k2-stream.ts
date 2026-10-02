@@ -18,7 +18,20 @@ export class LocalK2Stream extends DurableObject {
 		return this.ctx.storage.transaction(async transaction => {
 			const state = await transaction.get<LocalStreamState>("stream") ?? { records: [], subscriptions: [] };
 			let response: Response;
-			if (path === "/produce") {
+			if (path === "/expire") {
+				const expired = state.records.length;
+				state.base = (state.base ?? 0) + expired;
+				state.records = [];
+				for (const subscription of state.subscriptions) subscription.lease = null;
+				response = ok({ expired });
+			} else if (path === "/history") {
+				if (typeof body.name !== "string" || (body.resume !== undefined && typeof body.resume !== "boolean")) return invalid("Invalid history probe");
+				const subscription = state.subscriptions.find(item => item.name.toLowerCase() === (body.name as string).toLowerCase());
+				const base = state.base ?? 0;
+				const gap = base > 0 && (!subscription || subscription.cursor < base);
+				if (gap && subscription && body.resume === true) subscription.cursor = base;
+				response = ok({ gap });
+			} else if (path === "/produce") {
 				if (!Array.isArray(body.records) || body.records.length === 0 || body.records.length > 10000) return invalid("Invalid records");
 				const records: StreamRecord[] = [];
 				for (const record of body.records) {
@@ -32,11 +45,12 @@ export class LocalK2Stream extends DurableObject {
 				response = Response.json({ success: true });
 			} else if (path === "/subscriptions") {
 				if (typeof body.name !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.name) ||
-					!isObject(body.start_at) || body.start_at.type !== "earliest") return invalid("Only named earliest subscriptions are supported locally");
+					!isObject(body.start_at) || (body.start_at.type !== "earliest" && body.start_at.type !== "latest")) return invalid("Invalid subscription start");
 				const name = body.name;
 				let subscription = state.subscriptions.find(item => item.name.toLowerCase() === name.toLowerCase());
 				if (!subscription) {
-					subscription = { id: crypto.randomUUID(), name: body.name, cursor: 0, lease: null };
+					subscription = { id: crypto.randomUUID(), name: body.name,
+						cursor: (state.base ?? 0) + (body.start_at.type === "latest" ? state.records.length : 0), lease: null };
 					state.subscriptions.push(subscription);
 				}
 				response = ok({ id: subscription.id });
@@ -52,6 +66,7 @@ export class LocalK2Stream extends DurableObject {
 					if (typeof maxRecords !== "number" || !Number.isInteger(maxRecords) || maxRecords < 1 || maxRecords > 10000) return invalid("Invalid max_records");
 					const lease = leaseRecords(state, subscription, body.worker_id, maxRecords, Date.now(), crypto.randomUUID());
 					if (lease === "busy") return invalid("Local subscription has an active lease", 429);
+					if (lease === "history-gap") return invalid("Local subscription requires history recovery", 409);
 					subscription.lease = lease;
 					response = ok({ batch_id: lease?.id ?? null, leased_until_ms: lease?.until ?? null, records: lease?.records ?? [] });
 				} else if (batch) {

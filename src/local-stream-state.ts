@@ -19,19 +19,23 @@ export interface StreamSubscription {
 	lease: StreamLease | null;
 }
 export interface LocalStreamState {
+	base?: number; // Absolute position of the first record after simulated retention.
 	records: StreamRecord[];
 	subscriptions: StreamSubscription[];
 }
 export const LEASE_MS = 5 * 60 * 1000;
 
 export function leaseRecords(state: LocalStreamState, subscription: StreamSubscription,
-	workerId: string, maxRecords: number, now: number, batchId: string): StreamLease | null | "busy" {
+	workerId: string, maxRecords: number, now: number, batchId: string): StreamLease | null | "busy" | "history-gap" {
+	const base = state.base ?? 0;
+	if (subscription.cursor < base) return "history-gap";
 	const current = subscription.lease;
 	if (current && current.until > now) {
 		if (current.workerId !== workerId) return "busy";
 		return { ...current, until: now + LEASE_MS };
 	}
-	const records = state.records.slice(subscription.cursor, subscription.cursor + maxRecords);
+	const offset = subscription.cursor - base;
+	const records = state.records.slice(offset, offset + maxRecords);
 	return records.length === 0 ? null : { id: batchId, workerId, until: now + LEASE_MS,
 		end: subscription.cursor + records.length, records };
 }

@@ -1,11 +1,12 @@
 import { isDocumentUpdatedEvent, isObject, type DocumentUpdatedEvent } from "./event-contract";
 
 export type K2Request = (path: string, body: unknown) => Promise<Response>;
+export interface ConsumedRecord { content: string; timestamp_ms: number }
 export interface LeasedEventBatch {
 	subscriptionId: string;
 	batchId: string;
 	leasedUntil: number;
-	events: DocumentUpdatedEvent[];
+	records: ConsumedRecord[];
 }
 
 export class K2RequestError extends Error {
@@ -48,10 +49,13 @@ export class K2Client {
 		await this.call("/produce", { records: events.map(event => ({ content: encodeEvent(event), headers: { "content-type": "application/json" } })) });
 	}
 
-	async consume(subscription: string, workerId: string): Promise<LeasedEventBatch | null> {
-		const created = await this.call("/subscriptions", { name: subscription, start_at: { type: "earliest" } });
+	async ensureSubscription(subscription: string, start: "earliest" | "latest" = "earliest"): Promise<string> {
+		const created = await this.call("/subscriptions", { name: subscription, start_at: { type: start } });
 		if (!isObject(created.result) || typeof created.result.id !== "string") throw new Error("Invalid K2 subscription response");
-		const subscriptionId = created.result.id;
+		return created.result.id;
+	}
+	async consume(subscription: string, workerId: string): Promise<LeasedEventBatch | null> {
+		const subscriptionId = await this.ensureSubscription(subscription);
 		const response = await this.call(`/subscriptions/${encodeURIComponent(subscriptionId)}/consume`, { worker_id: workerId, max_records: 100 });
 		if (!isObject(response.result)) throw new Error("Invalid K2 consume response");
 		const result = response.result;
@@ -59,11 +63,12 @@ export class K2Client {
 		if (result.records.length === 0 && result.batch_id === null && result.leased_until_ms === null) return null;
 		if (result.records.length === 0 || typeof result.batch_id !== "string" || !result.batch_id ||
 			typeof result.leased_until_ms !== "number" || !Number.isSafeInteger(result.leased_until_ms) || result.leased_until_ms < 0) throw new Error("Invalid K2 lease");
-		const events = result.records.map(record => {
-			if (!isObject(record) || typeof record.content !== "string") throw new Error("Invalid K2 record");
-			return decodeEvent(record.content);
+		const records = result.records.map(record => {
+			if (!isObject(record) || typeof record.content !== "string" || typeof record.timestamp_ms !== "number" ||
+				!Number.isSafeInteger(record.timestamp_ms) || record.timestamp_ms < 0) throw new Error("Invalid K2 record envelope");
+			return { content: record.content, timestamp_ms: record.timestamp_ms };
 		});
-		return { subscriptionId, batchId: result.batch_id, leasedUntil: result.leased_until_ms, events };
+		return { subscriptionId, batchId: result.batch_id, leasedUntil: result.leased_until_ms, records };
 	}
 
 	async ack(batch: LeasedEventBatch, workerId: string): Promise<void> {

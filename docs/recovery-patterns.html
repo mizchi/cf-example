@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>再送・隔離・期限切れからの復旧</title>
+<style>body{font:16px/1.8 system-ui,sans-serif;color:#1f2328;background:#fff;margin:32px auto;padding:0 20px;max-width:1000px}a{color:#0550ae}h1{font-size:1.8rem}table{display:block;overflow:auto;border-collapse:collapse}th,td{border:1px solid #57606a;padding:8px;vertical-align:top}pre{padding:16px;background:#f6f8fa;white-space:pre-wrap;overflow-wrap:anywhere}code{overflow-wrap:anywhere}</style></head><body><main><h1>再送・処理不能イベント・保持期限切れから、どう回復するか？</h1>
+<p>文書イベントのサンプルに三つの契約を追加した。各 Quint モデルで壊れる操作順と修正版の不変条件を TLC で検査し、ローカル API と画面を Playwright で確認する。</p>
+<table>
+<thead>
+<tr>
+<th>パターン</th>
+<th>修正前の反例</th>
+<th>修正後の条件</th>
+<th>モデル</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>保存の再送</td>
+<td>保存成功 → 応答喪失 → 再送 → 二つ目の更新</td>
+<td>文書・outbox・再送の結果を同じ transaction で保存</td>
+<td><a href="../models/save-request.qnt">save-request.qnt</a></td>
+</tr>
+<tr>
+<td>処理不能イベント</td>
+<td>隔離をメモリー上で準備 → batch ack → 原文を失う</td>
+<td>正常処理または永続隔離が済むまで ack しない</td>
+<td><a href="../models/poison-events.qnt">poison-events.qnt</a></td>
+</tr>
+<tr>
+<td>保持期限切れ</td>
+<td>snapshot 読取 → 更新 → latest 読者の作成 → 更新を取り逃す</td>
+<td>latest 読者の作成 → snapshot 読取 → 切替 → ログ処理</td>
+<td><a href="../models/retention-recovery.qnt">retention-recovery.qnt</a></td>
+</tr>
+</tbody></table>
+<h2>保存 API の再送冪等性</h2>
+<p><code>POST /api/pipeline/&lt;project&gt;/documents/&lt;document&gt;</code> に <code>{ &quot;value&quot;: &quot;内容&quot;, &quot;requestId&quot;: &quot;操作の UUID&quot; }</code> を送る。同じ文書に同じ ID・内容を再送すると、最初の応答をそのまま返す。異なる内容で同じ ID を使うと 409、不正な ID は 400。ID を省略した要求は、それぞれ別の更新として扱う。</p>
+<p>再送の結果は文書と outbox と同じ DO transaction に保存する。発行済みでも最初の応答の <code>pending</code> は当時の値なので、現在状態は GET で取得する。画面は失敗時に同じ ID を保持し、成功後または内容変更時に新しい ID にする。ページ再読込を越える ID の保持は未実装。</p>
+<p>保存時の障害を「保存後の応答を失う」にして保存し、「なし」に戻して同じ内容を再保存する。版番号も未発行イベントも一つのままになる。</p>
+<h2>処理不能イベントの隔離</h2>
+<p>「処理できないイベントを追加」で不正な payload をローカルログへ追加する。正常なイベントは処理し、不正な payload は原文の base64、timestamp、理由を検索・監査の各 DO へ保存する。HTTP 応答の構造が壊れている場合や、一時的な保存エラーは隔離せず要求を失敗させ、ack しない。</p>
+<p>隔離 ID は payload と timestamp の SHA-256 で、batch ID ではない。再配送でも同じ隔離データを増やさない。同じ timestamp・payload は一つの保存コピーを共有する。隔離件数は発生回数の統計ではない。検索をリセットしても隔離データは保存し続ける。</p>
+<p>「隔離の保存前に停止」なら batch を ack しない。障害を解除して再送すると、済んだ正常処理も保存済みの隔離も重複させずに全件の判断を終える。隔離原文を修正して再投入する管理機能は未実装。</p>
+<h2>保持期限切れからの復旧</h2>
+<p>「ログの期限切れを再現」はローカルログの保持データを削除し、読者の checkpoint は残す。未処理部分が消えた検索は <code>recoveryRequired: true</code> となり、consume は 409 を返す。「現在の文書から検索を復旧」で新しい latest subscription を先に作り、現在文書を読み、検索の世代を切り替える。</p>
+<p>snapshot 取得中の保存は、snapshot 自体か新しい読者のログのどちらかで回収する。反映済みの方が新しければ、その版を保持する。古い世代の consumer は新しい世代へ書けない。</p>
+<p>復旧の制御は <a href="../src/search-recovery.ts">search-recovery.ts</a> に分けた。読者の作成か snapshot 取得が失敗した場合、現在の検索世代へ commit しない。二つの復旧が同じ旧世代から始まった場合、DO transaction 内で先に commit したものだけが成功する。遅い方は 409 となり、成功済みの世代と文書を上書きしない。</p>
+<p>文書 ID は保存・発行の前に project の catalog へ登録する。snapshot は登録済み文書をそれぞれ読む。一時点に揃った複数文書の transaction snapshot ではない。復旧対象は最大 100 文書。以前の版で作った文書は、同じ ID の発行操作で catalog に登録できる。</p>
+<p>監査は消えた履歴を現在文書から復元しない。<code>historyComplete: false</code> を永続化し、保持中・将来の更新を処理し続ける。表示件数は観測できた更新だけで、欠落をゼロ件扱いで埋めたり文書の版から監査件数を作ったりしない。検索を復旧しても監査の欠落フラグは消さない。</p>
+<p>期限切れの検出はローカルシミュレーターの checkpoint 情報を使う。<code>/expire</code> と <code>/history</code> は K2 の公式 API ではない。実 K2 での欠落検出は未検証。latest 作成と snapshot による手動復旧経路は HTTP アダプターにも実装したが、実サービスでの疎通は未検証。</p>
+<h2>検査</h2>
+<pre><code class="language-sh">just model-check saveRequest poisonEvents retentionRecovery
+just test tests/pipeline-recovery.spec.ts
+just test tests/search-recovery.spec.ts
+just check
+</code></pre>
+<p>モデルの範囲は保存二回・同一操作一つ、三件の batch と二回の配送、一文書の三版と一度の期限切れ。期限切れは復旧開始前に起き、復旧中に必要なログは保持される前提だ。復旧モデルでは文書の保存とログへの発行を一つの操作とし、発行までの停止や再送は別の文書イベントモデルで検査する。成功する再送・隔離・同時更新を挟んだ復旧経路も検査する。</p>
+<p>API・画面の E2E は障害の前後を実行し、Quint ITF の終端値と更新版・隔離件数・復旧後の版を照合する。復旧の制御テストは <a href="../tests/search-recovery.spec.ts">search-recovery.spec.ts</a> で、固定 seed の ITF の全操作を制御関数・投影関数・ローカル lease 関数へ対応づける。I/O の完了を Promise で止めて更新を挟み、各段階の検索の版、読者の checkpoint、監査で観測した版と欠落フラグを照合する。読者作成前、作成後から snapshot 取得まで、snapshot 取得後の更新、準備中の失敗、二つの復旧の競合も確認する。</p>
+<p>snapshot を先に読む設計例に順序を変えると、実装の制御テストでも v3 の取りこぼしを検出した。これは回帰テストが操作順の誤りを検出できることの確認で、既存の API にその不具合があったという主張ではない。隔離前 ack もモデル上の壊れる設計例である。保存 API の二重更新は既存実装のテストでも再現した。</p>
+<p>TLC が確認するのは有限モデルの安全性と完了経路の存在だ。制御テストの I/O は代替で、実 DO のすべての並行実行や実 K2 の正しさを証明していない。無限に続く障害の下での必ずの完了も保証しない。</p>
+<p>requestId の receipt、処理済み ID、隔離データ、catalog はこのデモでは期限なしで保持する。receipt 削除後の再送、隔離の容量制限、本番の認証・運用は対象外。</p>
+</main></body></html>

@@ -18,8 +18,14 @@
 				<form id="pipeline-form">
 					<label for="pipeline-value">イベント用の文書内容</label>
 					<textarea id="pipeline-value" maxlength="1000" rows="3"></textarea>
+					<label for="pipeline-write-fault">保存時の障害</label>
+					<select id="pipeline-write-fault">
+						<option value="none">なし</option>
+						<option value="after-save">保存後の応答を失う</option>
+					</select>
 					<button type="submit">文書を保存</button>
 				</form>
+				<p class="hint">保存に失敗したら、同じ内容のまま再実行できます。同じ操作の再送では版を増やしません。</p>
 				<p>保存済み v<output id="pipeline-version">0</output> · 未発行 <output data-testid="pipeline-pending">0</output> 件</p>
 				<pre id="pipeline-source"></pre>
 				<div class="pipeline-actions">
@@ -37,25 +43,35 @@
 						<option value="none">なし</option>
 						<option value="after-first-effect">1 件反映して停止</option>
 						<option value="before-ack">全件反映して ack 前に停止</option>
+						<option value="before-quarantine">隔離の保存前に停止</option>
 					</select>
 					<label><input type="checkbox" id="pipeline-reverse" />検索へ新しい版を先に渡す</label>
 				</div>
 				<p class="hint">障害を「なし」に戻して再実行すると回復します。同じイベントは二重に計上されません。</p>
+				<div class="pipeline-actions">
+					<button id="pipeline-poison">処理できないイベントを追加</button>
+					<button id="pipeline-expire">ログの期限切れを再現</button>
+				</div>
 				<div class="projection-grid">
 					<div>
 						<h3>検索</h3>
+						<p id="pipeline-search-health" aria-live="polite"></p>
 						<button id="pipeline-search-consume">検索を更新</button>
 						<label for="pipeline-query">検索語</label>
 						<input id="pipeline-query" type="search" />
 						<pre data-testid="pipeline-search"></pre>
 						<button id="pipeline-rebuild">検索を空にして再構築を準備</button>
 						<p class="hint">準備後に「検索を更新」で保持ログを再読込します。</p>
+						<button id="pipeline-recover">現在の文書から検索を復旧</button>
+						<pre id="pipeline-search-quarantine"></pre>
 					</div>
 					<div>
 						<h3>監査</h3>
+						<p id="pipeline-audit-health" aria-live="polite"></p>
 						<button id="pipeline-audit-consume">監査を更新</button>
 						<p>更新 <output data-testid="pipeline-audit-count">0</output> 件</p>
 						<pre id="pipeline-audit"></pre>
+						<pre id="pipeline-audit-quarantine"></pre>
 					</div>
 				</div>
 				<p id="pipeline-feedback" aria-live="polite"></p>

@@ -6,6 +6,8 @@ Quint のモデルは [`models/`](models/) に置き、予約・Queue メッセ�
 
 Queues と K2 の使い分けは、[ack・独立した読者・再構築を図で追う資料](docs/queues-vs-k2/README.md)にまとめました。`just dev` を起動したまま `just explain-check` で図と実行結果を検査し、`docs/queues-vs-k2/dist/index.html` を生成できます。
 
+[保存 API の再送・処理不能イベントの隔離・保持期限切れからの復旧](docs/recovery-patterns.md)もモデル化しました。画面で保存応答の喪失、隔離前の停止、ログの期限切れを試せます。検索は現在の登録文書から復旧し、監査は履歴欠落を明示します。`just model-check saveRequest poisonEvents retentionRecovery` で検査できます。
+
 ## 試した環境
 
 - Node.js 24、pnpm 10
@@ -56,7 +58,7 @@ curl http://localhost:5173/api/pipeline/demo/projections
 
 契約は [`src/event-contract.ts`](src/event-contract.ts)、K2 HTTP アダプターは [`src/k2-client.ts`](src/k2-client.ts)、形式モデルは [`models/document-events.qnt`](models/document-events.qnt) です。`just test tests/pipeline.spec.ts tests/k2-contract.spec.ts` と `just model-check documentEvents k2` で検査できます。
 
-既定では [`LocalK2Stream`](src/local-k2-stream.ts) が DO storage にログを保持します。K2 の produce・subscription・consume・ack の JSON を使うローカル代替で、一 subscription 一 lease に絞っています。実サービスの保持期限、128 並列 lease、遅延・容量制限は再現しません。発行・consumer はボタン/API で手動実行し、一回につき最大 100 件を扱います。outbox の自動再試行や常駐 consumer はありません。検索は部分文字列検索、監査と処理済み ID はこの小規模デモ用に全件保持します。
+既定では [`LocalK2Stream`](src/local-k2-stream.ts) が DO storage にログを保持します。K2 の produce・subscription・consume・ack の JSON を使うローカル代替で、一 subscription 一 lease に絞っています。保持期限切れは手動で全保持ログを削除して再現します。実時間での期限処理、128 並列 lease、遅延・容量制限は再現しません。発行・consumer はボタン/API で手動実行し、一回につき最大 100 件を扱います。outbox の自動再試行や常駐 consumer はありません。検索は部分文字列検索、監査と処理済み ID はこの小規模デモ用に全件保持します。
 
 ### 実 K2 へ切り替える
 
@@ -68,7 +70,7 @@ cp .dev.vars.example .dev.vars
 K2_ENDPOINT='https://<STREAM_ID>.k2.cloudflarestorage.com' just dev
 ```
 
-endpoint の `<...>` は実 ID に置き換えてください。token は Worker 側の secret binding で読み、ブラウザーへ渡しません。`K2_ENDPOINT` を省略するとローカルへ戻ります。実 K2 では障害注入を無効にします。新しい project と検索の再構築は subscription を追加するので、不要になったものは K2 側で削除してください。再構築できるのは保持期間内の、このサンプルの `document.updated` 形式のログです。保存直後の POST を再送する冪等化、HTTP API の認証、バックグラウンド処理は本番利用時に追加する必要があります。
+endpoint の `<...>` は実 ID に置き換えてください。token は Worker 側の secret binding で読み、ブラウザーへ渡しません。`K2_ENDPOINT` を省略するとローカルへ戻ります。実 K2 では障害注入を無効にします。新しい project と検索の再構築は subscription を追加するので、不要になったものは K2 側で削除してください。再構築できるのは保持期間内の、このサンプルの `document.updated` 形式のログです。保存の冪等化には同じ `requestId` を再送します。HTTP API の認証、バックグラウンド処理は本番利用時に追加する必要があります。
 
 ## 確認した機能
 

@@ -20,7 +20,7 @@ test("K2 HTTP 契約: UTF-8 の produce と subscription/consume/ack", async () 
 	});
 	await client.produce([event]);
 	const batch = await client.consume("search", "worker-1");
-	expect(batch).toEqual({ subscriptionId: "subscription-1", batchId: "batch-1", leasedUntil: 1790165100000, events: [event] });
+	expect(batch).toEqual({ subscriptionId: "subscription-1", batchId: "batch-1", leasedUntil: 1790165100000, records: [{ content, timestamp_ms: 1790164800000 }] });
 	await client.ack(batch!, "worker-1");
 	expect(calls).toEqual([
 		{ path: "/produce", body: { records: [{ content, headers: { "content-type": "application/json" } }] } },
@@ -40,7 +40,7 @@ test("K2 の失敗フラグ・結果不明・consume の一時エラーを区別
 	await expect(client.consume("search", "worker-1")).rejects.toMatchObject({ retryable: true, code: 10216 });
 });
 
-test("空 batch は ack せず、不正なイベントも成功扱いしない", async () => {
+test("空 batch は ack せず、不正な HTTP record envelope も成功扱いしない", async () => {
 	let invalid = false;
 	const paths: string[] = [];
 	const client = new K2Client(async path => {
@@ -52,7 +52,7 @@ test("空 batch は ack せず、不正なイベントも成功扱いしない",
 	});
 	expect(await client.consume("search", "worker")).toBeNull();
 	invalid = true;
-	await expect(client.consume("search", "worker")).rejects.toThrow("Invalid document.updated record");
+	await expect(client.consume("search", "worker")).rejects.toThrow("Invalid K2 record envelope");
 	expect(paths.some(path => path.endsWith("/ack"))).toBe(false);
 });
 

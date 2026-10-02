@@ -20,4 +20,6 @@ function checkLinks(file, pattern) {
 
 checkLinks(markdown, /!?(?:\[[^\]]*\])\(([^)\s]+)\)/g);
 checkLinks(html, /\bhref="([^"]+)"/g);
+checkLinks(resolve(root, "docs/recovery-patterns.md"), /!?(?:\[[^\]]*\])\(([^)\s]+)\)/g);
+checkLinks(resolve(root, "docs/recovery-patterns.html"), /\bhref="([^"]+)"/g);
 console.log("guide links: Markdown and HTML resolve locally");

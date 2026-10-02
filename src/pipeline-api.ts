@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { isConsumerFault, isObject, isProjectionState, type PipelineView, type ProjectionName, type ProjectionState } from "./event-contract";
-import { createEventStream, transportMode } from "./event-transport";
+import { createEventStream, localHistoryGap, transportMode } from "./event-transport";
+import { classifyRecord } from "./event-disposition";
+import { sourceSnapshot } from "./event-source";
+import { recoverSearchProjection } from "./search-recovery";
 
 async function projection(project: string, name: ProjectionName) {
 	const stub = env.EVENT_PROJECTION.get(env.EVENT_PROJECTION.idFromName(`${project}:${name}`));
@@ -30,27 +33,59 @@ async function consume(project: string, name: ProjectionName, request: Request):
 	if ((fault !== "none" || body.reverse === true) && transportMode() !== "local") return new Response("Fault injection requires local transport", { status: 400 });
 	const workerId = `${project}-${name}`;
 	try {
-		const current = await readProjection(project, name);
+		let current = await readProjection(project, name);
+		if (await localHistoryGap(project, current.subscription)) {
+			const { stub, url } = await projection(project, name);
+			const response = await stub.fetch(url.replace("/?", "/history-gap?"), { method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ subscription: current.subscription }) });
+			if (!response.ok) throw new Error("History generation changed");
+			current = await readProjection(project, name);
+			if (name === "audit") await localHistoryGap(project, current.subscription, true);
+		}
+		if (current.recoveryRequired) return Response.json({ error: "Retained history is missing; recover search from current documents", recoveryRequired: true }, { status: 409 });
 		const client = createEventStream(project);
 		const batch = await client.consume(current.subscription, workerId);
 		if (!batch) return Response.json({ records: 0 });
-		const events = body.reverse === true ? [...batch.events].reverse() : batch.events;
+		const records = body.reverse === true ? [...batch.records].reverse() : batch.records;
 		const { stub, url } = await projection(project, name);
 		let applied = 0;
-		for (const event of events) {
+		for (const record of records) {
+			const disposition = await classifyRecord(record);
+			const event = disposition.event;
 			// A shared remote stream can carry multiple demonstration projects.
-			if (event.projectId !== project) continue;
-			const response = await stub.fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ event, subscription: current.subscription }) });
+			if (event && event.projectId !== project) continue;
+			if (disposition.quarantine && fault === "before-quarantine") throw new Error("Consumer stopped before durable quarantine");
+			const response = await stub.fetch(disposition.quarantine ? url.replace("/?", "/quarantine?") : url,
+				{ method: "POST", headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ ...(event ? { event } : { record: disposition.quarantine }), subscription: current.subscription }) });
 			if (!response.ok) throw new Error(`Projection update failed: HTTP ${response.status}`);
 			applied++;
 			if (fault === "after-first-effect" && applied === 1) throw new Error("Consumer stopped after first effect, before ack");
 		}
 		if (fault === "before-ack") throw new Error("Consumer stopped before ack");
 		await client.ack(batch, workerId);
-		return Response.json({ records: batch.events.length });
+		return Response.json({ records: batch.records.length });
 	} catch (error) {
 		return Response.json({ error: error instanceof Error ? error.message : "Consume failed" }, { status: 503 });
+	}
+}
+
+async function recover(project: string): Promise<Response> {
+	try {
+		const current = await readProjection(project, "search");
+		const { stub, url } = await projection(project, "search");
+		const subscription = `${new URL(url).searchParams.get("subscription")}-${crypto.randomUUID()}`;
+		return await recoverSearchProjection(current.subscription, {
+			createLatestSubscription: async () => {
+				await createEventStream(project).ensureSubscription(subscription, "latest");
+				return subscription;
+			},
+			readDocuments: () => sourceSnapshot(project),
+			commit: body => stub.fetch(url.replace("/?", "/recover?"), { method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body) }),
+		});
+	} catch (error) {
+		return Response.json({ error: error instanceof Error ? error.message : "Recovery failed" }, { status: 503 });
 	}
 }
 
@@ -72,6 +107,13 @@ export async function handlePipeline(request: Request): Promise<Response> {
 		const view: PipelineView = { transport: transportMode(), search: { ...search,
 			documents: search.documents.filter(document => document.value.toLocaleLowerCase().includes(query)) }, audit };
 		response = Response.json(view);
+	} else if (path === "/projections/search/recover" && request.method === "POST") {
+		response = await recover(project);
+	} else if ((path === "/faults/poison" || path === "/faults/expire") && request.method === "POST") {
+		if (transportMode() !== "local") return new Response("Fault injection requires local transport", { status: 400 });
+		response = await env.EVENT_STREAM.get(env.EVENT_STREAM.idFromName(project)).fetch(`https://local-k2/${path === "/faults/poison" ? "produce" : "expire"}`, {
+			method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(path === "/faults/poison" ? { records: [{ content: btoa('{"value":"bad"}') }] } : {}),
+		});
 	} else if (consumer && request.method === "POST") {
 		response = await consume(project, consumer[1] as ProjectionName, request);
 	} else if (reset && request.method === "POST") {

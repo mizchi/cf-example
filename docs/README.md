@@ -20,11 +20,13 @@
 
 ローカルの `cf dev` は Vite の画面と Worker API を一つの URL で提供する。`cloudflare.config.ts` は五つの DO と Workers Cache を設定するが、この環境のローカル実行では Cache の HIT/MISS と purge 伝播は再現していない。文書イベントは既定でローカルの DO ログを使い、K2 HTTP へ切り替えるアダプターもある。実 K2、Queues・D1・R2 の binding、`waitUntil` のジョブ API は実行検証していない。
 
+保存の再送・隔離・期限切れ復旧の三つのモデルと実装テストを追加した。[追加パターンの契約と検査範囲](recovery-patterns.md)で、操作と反例を確認できる。
+
 ## 1. モデルの読み方
 
 Quint の `var` は状態、`action` は一回の状態変化、`x'` は変化**後**の値を表す。`stepNaive` は修正前の操作を、`stepSafe` は修正後の操作を選ぶ。モデル検査器は操作の順序を探索し、不変条件が初めて破れる状態列を返す。ここではその列を反例と呼ぶ。
 
-9 モデルはそれぞれ一つの対象と少数の参加者に絞っている。これは Cloudflare 全体の正しさを証明するモデルではない。具体的な観測値と対応づけられる状態だけを残し、順序が変わると壊れる最小の例を探す。
+12 モデルはそれぞれ一つの対象と少数の参加者に絞っている。これは Cloudflare 全体の正しさを証明するモデルではない。具体的な観測値と対応づけられる状態だけを残し、順序が変わると壊れる最小の例を探す。
 
 ### 共通操作とアプリ固有の契約
 
@@ -296,9 +298,9 @@ TLC は三つの修正前の反例を検出し、修正版の五つの不変条�
 
 [`tests/pipeline.spec.ts`](../tests/pipeline.spec.ts) は保存後の発行失敗、発行後の応答喪失、batch 処理途中の停止、古い版の到着、検索の再構築、同時保存と再取得、画面操作を観測する。途中停止からの回復テストは [`tests/quint-oracle.ts`](../tests/quint-oracle.ts) で得た ITF の `documentVersion`・`searchVersion`・`auditCount` と API の最終状態を照合する。操作列そのものを再生するテストではない。
 
-[`tests/k2-contract.spec.ts`](../tests/k2-contract.spec.ts) は公式 HTTP の JSON 形、UTF-8/base64、produce の失敗と結果不明、空 batch、不正なイベントの拒否を確認する。既定のログは [`LocalK2Stream`](../src/local-k2-stream.ts) という DO のローカル代替で、一 subscription 一 lease に絞った実装だ。実 K2 の遅延、保持期限、128 並列 lease、実ネットワークでの障害は検証していない。
+[`tests/k2-contract.spec.ts`](../tests/k2-contract.spec.ts) は公式 HTTP の JSON 形、UTF-8/base64、produce の失敗と結果不明、空 batch、不正な HTTP record envelope の拒否を確認する。既定のログは [`LocalK2Stream`](../src/local-k2-stream.ts) という DO のローカル代替で、一 subscription 一 lease に絞った実装だ。実 K2 の遅延、保持期限、128 並列 lease、実ネットワークでの障害は検証していない。
 
-このデモの発行と consumer はボタン/API で手動実行する。一回につき最大 100 件で、未処理分があれば繰り返す。自動再試行、認証、ログや処理済み ID の掃除、保持期間を超えた検索の再構築は扱わない。監査はログが保持される間の再処理に耐えるが、本番用の不変な監査保管庫を実装したものではない。
+このデモの発行と consumer はボタン/API で手動実行する。一回につき最大 100 件で、未処理分があれば繰り返す。自動再試行、認証、ログや処理済み ID の掃除は扱わない。ローカルでの保持期限切れと現在文書からの復旧は、追加パターンで扱う。監査はログが保持される間の再処理に耐えるが、本番用の不変な監査保管庫を実装したものではない。
 
 ## 11. 反例から実装テストへ
 
@@ -306,6 +308,16 @@ TLC は三つの修正前の反例を検出し、修正版の五つの不変条�
 
 <!-- output: all-models -->
 ```text
+Retention recovery: naive counterexample found.
+Retention recovery: silent audit gap counterexample found.
+Retention recovery: repaired invariants hold.
+Retention recovery: safe progress witness found.
+Save request idempotency: naive counterexample found.
+Save request idempotency: repaired invariants hold.
+Save request idempotency: safe progress witness found.
+Poison event quarantine: naive counterexample found.
+Poison event quarantine: repaired invariants hold.
+Poison event quarantine: safe progress witness found.
 Workers Cache sync: naive counterexample found.
 Workers Cache sync: repaired invariants hold.
 Durable Object claim: naive counterexample found.
@@ -342,7 +354,7 @@ Document event pipeline: publication retry completion witness found.
 ```sh
 just install
 pnpm exec playwright install chromium
-just model-check # Java が必要。九つのモデルの反例と修正版を TLC で確認
+just model-check # Java が必要。十二のモデルの反例と修正版を TLC で確認
 just model-check k2 # K2 のみ検査
 just model-check documentEvents # 文書イベントの契約
 just test        # DO・画面・イベント処理の E2E と HTTP 契約
@@ -365,13 +377,13 @@ just check       # 型検査、ビルド、dry run、E2E、モデル検査
 | K2 | イベントごとの副作用は高々一回、全件処理前に batch を確定しない。古い ack は新しい配送を確定しない | 二件、二 subscription、二 worker、最大二配送。宛先でイベント ID と副作用を原子的に確定。保持期間内 |
 | 文書イベント | 保存イベントを失わず、検索が巻き戻らず、監査を二重計上しない | 一文書、二つの版、最大二回の発行・処理。outbox と各宛先で原子的に保存。保持期間内 |
 
-Playwright はローカル実装で、DO の同時要求の成功件数、遅れた GET 後の画面の版、文書イベントの障害回復と再構築を照合した。DO の成功件数と文書イベントの最終状態には ITF の期待値を使うが、操作列そのものは再生していない。これらはテストした入力と実行環境での観測であり、すべての要求順序や障害での正しさを保証しない。K2 の実サービスなどは未照合だ。
+Playwright はローカル実装で、DO の同時要求の成功件数、遅れた GET 後の画面の版、文書イベントの障害回復と再構築を照合した。DO の成功件数と文書イベントの最終状態には ITF の期待値を使う。期限切れ復旧の制御テストでは、固定 seed の ITF 操作列を制御関数・投影関数・ローカル lease 関数へ対応づけ、各段階の値を照合する。制御テストの I/O は代替である。これらはテストした入力と実行環境での観測であり、すべての要求順序や障害での正しさを保証しない。K2 の実サービスなどは未照合だ。
 
 ## 13. 何を保証できないか
 
 - **最終的な完了**: 不変条件は「悪い状態が現れない」という安全性だ。仕事が必ず処理される、replica が必ず追いつく、R2 の競合した書き込みがいつか成功する、といった進行は示さない。`safe progress witness found` も成功する**一つの経路が存在する**ことの確認であり、すべての経路の完了保証ではない。
 - **Queue の exactly once**: `atMostOneEffect` は副作用ゼロ回でも成立する。Consumer の再試行上限、保持期限、DLQ、並列配送、繰り返す失敗はモデルにない。[再試行上限後は DLQ がなければ削除される](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)ため、Queues だけで「必ず一回実行」を主張できない。外部 API 呼び出しと処理済み記録を別々に行う実装にも、原子的な `applySafe` の結果は当てはまらない。
-- **K2 の exactly once と無期限の保持**: lease は宛先の副作用を排他制御しない。原子的なイベント ID の記録を前提とした安全性であり、すべてのイベントが必ず完了する保証ではない。文書イベントモデルは二回までの producer 再送を扱うが、保持期限切れ・多数の並列 batch はモデル外だ。
+- **K2 の exactly once と無期限の保持**: lease は宛先の副作用を排他制御しない。原子的なイベント ID の記録を前提とした安全性であり、すべてのイベントが必ず完了する保証ではない。文書イベントモデルは二回までの producer 再送を扱うが、K2 自体のモデルには保持期限切れ・多数の並列 batch を含めない。期限切れ後のアプリの復旧は別の `retentionRecovery` モデルで検査する。
 - **`waitUntil` での受理後完了**: 修正版は効果の完了を待ってから応答する。応答後に走る仕事を 202 で受理し、その完了を保証したことにはならない。[`waitUntil` の応答後の実行には期限がある](https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil)。応答送信の失敗、再送、部分的に成功した外部副作用もこのモデルにない。
 - **Cloudflare 上での一貫性**: Cache の HIT/MISS・purge 伝播、複数地域、実 D1 replica、実 R2、Queues と K2 の binding・consumer はこのリポジトリで検証していない。モデルの前提が実際の境界とずれていれば、モデル内の保証は実装へ移せない。
 

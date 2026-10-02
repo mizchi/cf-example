@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const markdown = resolve(root, "docs/README.md");
-const html = resolve(root, "docs/index.html");
 
 function checkLinks(file, pattern) {
 	const source = readFileSync(file, "utf8");
@@ -19,7 +18,5 @@ function checkLinks(file, pattern) {
 }
 
 checkLinks(markdown, /!?(?:\[[^\]]*\])\(([^)\s]+)\)/g);
-checkLinks(html, /\bhref="([^"]+)"/g);
 checkLinks(resolve(root, "docs/recovery-patterns.md"), /!?(?:\[[^\]]*\])\(([^)\s]+)\)/g);
-checkLinks(resolve(root, "docs/recovery-patterns.html"), /\bhref="([^"]+)"/g);
-console.log("guide links: Markdown and HTML resolve locally");
+console.log("guide links: Markdown guides resolve locally");

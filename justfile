@@ -27,13 +27,18 @@ test *args:
 model-check *models:
     node scripts/check-model.mjs {{models}}
 
-# Check links in the consolidated guide and its standalone HTML copy.
+# Check local links in the Markdown guides.
 docs-check:
     node scripts/check-guide-links.mjs
 
+# Verify the main Markdown guide with mizchi/explainer.
+guide-check:
+    node "{{explainer_skill}}/scripts/verify-doc.mjs" docs --skip-html
+    just docs-check
+
 # Verify the Queues/K2 illustrated guide with mizchi/explainer; start just dev first.
 explain-check:
-    node "{{explainer_skill}}/scripts/verify-doc.mjs" docs/queues-vs-k2
+    node "{{explainer_skill}}/scripts/verify-doc.mjs" docs/queues-vs-k2 --skip-html
 
 # Check the upload and bindings without publishing.
 deploy-dry-run:

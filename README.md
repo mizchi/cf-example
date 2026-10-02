@@ -4,7 +4,7 @@
 
 Quint のモデルは [`models/`](models/) に置き、予約・Queue メッセージ・K2 subscription の共通操作は [`models/lib/`](models/lib/) に分けています。文書更新から検索と監査を作るイベント処理のサンプルも含みます。
 
-Queues と K2 の使い分けは、[ack・独立した読者・再構築を図で追う資料](docs/queues-vs-k2/README.md)にまとめました。`just dev` を起動したまま `just explain-check` で図と実行結果を検査し、`docs/queues-vs-k2/dist/index.html` を生成できます。
+Queues と K2 の使い分けは、[ack・独立した読者・再構築を図で追う資料](docs/queues-vs-k2/README.md)にまとめました。`just dev` を起動したまま `just explain-check` で図と実行結果の引用を検査できます。
 
 [保存 API の再送・処理不能イベントの隔離・保持期限切れからの復旧](docs/recovery-patterns.md)もモデル化しました。画面で保存応答の喪失、隔離前の停止、ログの期限切れを試せます。検索は現在の登録文書から復旧し、監査は履歴欠落を明示します。`just model-check saveRequest poisonEvents retentionRecovery` で検査できます。
 
